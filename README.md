@@ -26,6 +26,7 @@ pub(open) trait Driver {
 | Site | https://moonbitstack.github.io/moondb |
 | Guide | https://moonbitstack.github.io/moondb/guide.html |
 | API | https://moonbitstack.github.io/moondb/api.html |
+| Showcase | https://moonbitstack.github.io/moondb/showcase.html |
 | Package | https://mooncakes.io/docs/moonbitstack/moondb |
 
 ## The ratified implementations
@@ -35,6 +36,11 @@ pub(open) trait Driver {
 | moonmysql | MySQL / MariaDB | https://moonbitstack.github.io/moondb/mysql.html |
 | moonpostgres | PostgreSQL | https://moonbitstack.github.io/moondb/postgres.html |
 | moonsqlite | SQLite | https://moonbitstack.github.io/moondb/sqlite.html |
+
+The same three cards are addressable on the front page, for a link that lands on
+the card rather than the page: https://moonbitstack.github.io/moondb/#moonmysql,
+https://moonbitstack.github.io/moondb/#moonpostgres,
+https://moonbitstack.github.io/moondb/#moonsqlite.
 
 ## Use
 
