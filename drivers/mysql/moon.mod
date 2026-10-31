@@ -1,6 +1,6 @@
 name = "moonbitstack/moonmysql"
 
-version = "0.7.6"
+version = "0.7.7"
 
 readme = "README.md"
 
@@ -16,8 +16,8 @@ preferred_target = "native"
 
 import {
   "moonbitstack/moonbase@0.4.2",
-  "moonbitstack/mooncrypt@0.4.5",
-  "moonbitstack/mooncred@0.6.6",
+  "moonbitstack/mooncrypt@0.4.6",
+  "moonbitstack/mooncred@0.6.7",
   "moonbitstack/moondb@0.2.4",
   "moonbitstack/moonvar@0.2.0",
   "moonbitlang/async@0.22.5",
