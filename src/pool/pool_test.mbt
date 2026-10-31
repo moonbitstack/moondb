@@ -384,7 +384,7 @@ test "pool ward: a failed open holds new connections back by the backoff" {
       @moondb.MockDriver::new()
     },
     clock=() => now[0],
-    ward=@moonpool.Ward::new(backoff=@moonward.backoff),
+    ward=@moonpool.Ward::new(backoff=@moonward.Backoff::new(jitter=Full)),
     rand=() => 0.5,
   )
   try pool.acquire() |> ignore catch {

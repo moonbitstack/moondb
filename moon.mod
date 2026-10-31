@@ -1,6 +1,6 @@
 name = "moonbitstack/moondb"
 
-version = "0.2.3"
+version = "0.2.4"
 
 readme = "README.md"
 
@@ -16,8 +16,8 @@ preferred_target = "wasm-gc"
 
 import {
   "moonbitstack/moondate@0.1.0",
-  "moonbitstack/moonpool@0.3.0",
-  "moonbitstack/moonward@0.1.0",
+  "moonbitstack/moonpool@0.3.1",
+  "moonbitstack/moonward@0.2.0",
 }
 
 source = "src"
