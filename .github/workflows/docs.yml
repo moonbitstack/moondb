@@ -3,6 +3,11 @@ name: Docs
 on:
   push:
     branches: [master]
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "scripts/**"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -21,6 +26,32 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Install MoonBit
+        # the versioned download paths are not served, so take latest and record
+        # what it resolved to: the API page is generated from this emitter
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch the registry index
+        # without this the dependency graph cannot be resolved on a fresh checkout
+        run: |
+          moon version --all
+          moon update
+
+      - name: Generate .mbti for every package the API page lists
+        run: |
+          moon info --target js
+          for m in drivers/sqlite drivers/postgres drivers/mysql; do
+            (cd "$m" && moon update && moon info --target js)
+          done
+
+      - name: Generate the API page
+        run: python3 scripts/gen_api.py
+
+      - name: Check the generated page is what is committed
+        run: git diff --exit-code -- docs/api.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
