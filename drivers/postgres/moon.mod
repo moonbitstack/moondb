@@ -1,6 +1,6 @@
 name = "moonbitstack/moonpostgres"
 
-version = "0.6.6"
+version = "0.6.7"
 
 readme = "README.md"
 
@@ -18,7 +18,7 @@ import {
   "moonbitstack/moondb@0.2.4",
   "moonbitstack/moonvar@0.2.0",
   "moonbitstack/moonbase@0.4.2",
-  "moonbitstack/mooncrypt@0.4.5",
+  "moonbitstack/mooncrypt@0.4.6",
   "moonbitlang/async@0.22.5",
 }
 
