@@ -39,6 +39,7 @@ import {
   "moonbitstack/moondate@0.1.0",
   "moonbitstack/moonpool@0.3.1",
   "moonbitstack/moonward@0.2.0",
+  "moonbitlang/async@0.22.5",
 }
 
 source = "src"

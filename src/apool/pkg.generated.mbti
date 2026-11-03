@@ -1,0 +1,36 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moondb/apool"
+
+import {
+  "moonbitstack/moondb",
+  "moonbitstack/moonpool",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct AsyncPool[D] {
+  // private fields
+}
+pub async fn[D : @moondb.AsyncDriver] AsyncPool::acquire(Self[D]) -> D raise @moondb.DbError
+pub fn[D] AsyncPool::acquire_timeout_ms(Self[D]) -> Int64
+pub fn[D] AsyncPool::capacity(Self[D]) -> Int32
+pub async fn[D : @moondb.AsyncDriver] AsyncPool::close_all(Self[D]) -> Unit noraise
+pub fn[D] AsyncPool::idle_count(Self[D]) -> Int32
+pub fn[D] AsyncPool::in_use_count(Self[D]) -> Int32
+pub fn[D] AsyncPool::is_closed(Self[D]) -> Bool
+pub fn[D] AsyncPool::max_lifetime_ms(Self[D]) -> Int64
+pub fn[D] AsyncPool::max_size(Self[D]) -> Int32
+pub fn[D] AsyncPool::new(async () -> D raise @moondb.DbError, max_size? : Int32, overflow? : Int32, max_lifetime_ms? : Int64, pre_ping? : Bool, acquire_timeout_ms? : Int64, clock? : () -> Int64, ward? : @moonpool.Ward, reset? : async (D) -> Unit raise @moondb.DbError, rand? : () -> Double, cpu? : () -> Int32) -> Self[D] raise @moondb.DbError
+pub fn[D] AsyncPool::open_count(Self[D]) -> Int32
+pub fn[D] AsyncPool::overflow(Self[D]) -> Int32
+pub fn[D] AsyncPool::pre_ping(Self[D]) -> Bool
+pub async fn[D : @moondb.AsyncDriver] AsyncPool::release(Self[D], D) -> Unit noraise
+pub async fn[D : @moondb.AsyncDriver] AsyncPool::try_acquire(Self[D]) -> D? raise @moondb.DbError
+pub async fn[D : @moondb.AsyncDriver, R] AsyncPool::with_conn(Self[D], async (D) -> R raise @moondb.DbError) -> R raise @moondb.DbError
+
+// Type aliases
+
+// Traits

@@ -1,0 +1,12 @@
+// The async connection pool. Kept in its own package, apart from `src/pool`, so a
+// synchronous driver never pulls in an async runtime: this package is the only part
+// of moondb that depends on `moonbitlang/async`, and only a caller that manages an
+// async driver (a wire driver inside an event loop) needs it.
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/semaphore",
+  "moonbitlang/core/random",
+  "moonbitstack/moondate",
+  "moonbitstack/moondb",
+  "moonbitstack/moonpool",
+}
