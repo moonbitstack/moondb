@@ -1,6 +1,6 @@
 name = "moonbitstack/moondb"
 
-version = "0.2.4"
+version = "0.2.5"
 
 readme = "README.md"
 
@@ -8,7 +8,28 @@ repository = "https://github.com/moonbitstack/moondb"
 
 license = "Apache-2.0"
 
-keywords = [ "database", "sql", "driver", "db-api", "moonbit", "interface" ]
+keywords = [
+  "database",
+  "db",
+  "sql",
+  "driver",
+  "interface",
+  "db-api",
+  "dbapi",
+  "pep249",
+  "database-sql",
+  "connection-pool",
+  "pool",
+  "transaction",
+  "prepared-statement",
+  "async",
+  "sqlite",
+  "postgres",
+  "postgresql",
+  "mysql",
+  "mariadb",
+  "moonbit",
+]
 
 description = "The standard database-access interface for MoonBit — the driver↔query-layer contract, transliterated from Go's database/sql/driver and Python's DB-API 2.0. ORMs (moonorm) build on it; drivers (moonsqlite / moonpostgres / moonmysql) implement it."
 

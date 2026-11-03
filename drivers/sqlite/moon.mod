@@ -1,6 +1,6 @@
 name = "moonbitstack/moonsqlite"
 
-version = "0.3.3"
+version = "0.3.4"
 
 readme = "README.md"
 
@@ -10,12 +10,16 @@ license = "Apache-2.0"
 
 keywords = [
   "sqlite",
-  "database",
+  "sqlite3",
   "driver",
-  "moondb",
-  "moonorm",
+  "database",
+  "sql",
+  "embedded",
   "ffi",
   "native",
+  "moondb",
+  "moonorm",
+  "moonbit",
 ]
 
 description = "SQLite driver for moondb/moonorm — native FFI, amalgamation vendored here (isolated)."

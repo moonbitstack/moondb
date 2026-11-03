@@ -1,6 +1,6 @@
 name = "moonbitstack/moonmysql"
 
-version = "0.7.7"
+version = "0.7.8"
 
 readme = "README.md"
 
@@ -8,7 +8,25 @@ repository = "https://github.com/moonbitstack/moondb"
 
 license = "Apache-2.0"
 
-keywords = [ "mysql", "driver", "moondb", "wire", "database", "protocol" ]
+keywords = [
+  "mysql",
+  "mariadb",
+  "driver",
+  "database",
+  "sql",
+  "wire-protocol",
+  "protocol",
+  "client",
+  "tls",
+  "caching-sha2-password",
+  "prepared-statement",
+  "async",
+  "pool",
+  "pymysql",
+  "moondb",
+  "wire",
+  "moonbit",
+]
 
 description = "Pure-MoonBit MySQL wire-protocol driver implementing @moondb.Driver — no C, like PyMySQL."
 

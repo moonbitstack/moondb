@@ -1,6 +1,6 @@
 name = "moonbitstack/moonpostgres"
 
-version = "0.6.7"
+version = "0.6.8"
 
 readme = "README.md"
 
@@ -8,7 +8,27 @@ repository = "https://github.com/moonbitstack/moondb"
 
 license = "Apache-2.0"
 
-keywords = [ "postgres", "driver", "moondb", "wire", "database" ]
+keywords = [
+  "postgres",
+  "postgresql",
+  "pg",
+  "driver",
+  "database",
+  "sql",
+  "wire-protocol",
+  "protocol",
+  "client",
+  "async",
+  "scram",
+  "tls",
+  "copy",
+  "listen-notify",
+  "prepared-statement",
+  "asyncpg",
+  "moondb",
+  "wire",
+  "moonbit",
+]
 
 description = "Pure-MoonBit PostgreSQL wire-protocol driver implementing @moondb.AsyncDriver — no C, like asyncpg."
 
