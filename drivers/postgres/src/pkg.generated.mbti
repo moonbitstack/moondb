@@ -2,6 +2,7 @@
 package "moonbitstack/moonpostgres"
 
 import {
+  "moonbitlang/async/io",
   "moonbitstack/moondb",
   "moonbitstack/moonnet/tcp",
   "moonbitstack/moontls/tls",
@@ -110,7 +111,7 @@ pub fn utf8_decode(Bytes) -> String
 
 // Types and methods
 pub struct PgConn {
-  stream : @tcp.Conn
+  stream : PgWire
   host : String
   port : Int32
   mut closed : Bool
@@ -133,6 +134,8 @@ pub async fn PgConn::copy_out(Self, String) -> Bytes raise @moondb.DbError
 pub async fn PgConn::declare_cursor(Self, String, String) -> Unit raise @moondb.DbError
 pub async fn PgConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
 pub async fn PgConn::fetch_cursor(Self, String, Int32) -> Array[@moondb.Row] raise @moondb.DbError
+pub fn PgConn::is_closed(Self) -> Bool
+pub fn PgConn::is_streaming(Self) -> Bool
 pub async fn PgConn::listen(Self, String) -> Unit raise @moondb.DbError
 pub async fn PgConn::next_notification(Self) -> (String, String) raise @moondb.DbError
 pub async fn PgConn::notify(Self, String, payload? : String) -> Unit raise @moondb.DbError
@@ -163,6 +166,15 @@ pub struct PgRowStream {
 pub async fn PgRowStream::close(Self) -> Unit raise @moondb.DbError
 pub async fn PgRowStream::next(Self) -> @moondb.Row? raise @moondb.DbError
 pub impl @moondb.AsyncCursor for PgRowStream
+
+pub struct PgWire {
+  // private fields
+}
+pub fn PgWire::close(Self) -> Unit
+pub fn PgWire::pipe(@io.PipeRead, @io.PipeWrite) -> Self
+pub async fn PgWire::read_exactly(Self, Int32) -> Bytes
+pub fn PgWire::tcp(@tcp.Conn) -> Self
+pub async fn PgWire::write(Self, Bytes) -> Unit
 
 // Type aliases
 pub using @moondb {type DbError}

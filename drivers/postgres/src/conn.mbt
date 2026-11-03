@@ -13,7 +13,7 @@
 /// before the next begins, as the wire protocol is a strict request/response
 /// pipeline per connection.
 pub struct PgConn {
-  stream : @tcp.Conn
+  stream : PgWire
   host : String
   port : Int32
   mut closed : Bool
@@ -96,7 +96,7 @@ pub async fn PgConn::connect(
     None
   }
   let conn = PgConn::{
-    stream,
+    stream: PgWire::tcp(stream),
     host,
     port,
     closed: false,
@@ -117,7 +117,7 @@ pub async fn PgConn::connect(
 
 ///|
 async fn PgConn::write_all(self : PgConn, bytes : Bytes) -> Unit raise DbError {
-  (self.stream : &@io.Writer).write(bytes) catch {
+  self.stream.write(bytes) catch {
     e => raise @moondb.ConnectError("write: \{e}")
   }
 }
@@ -126,7 +126,7 @@ async fn PgConn::write_all(self : PgConn, bytes : Bytes) -> Unit raise DbError {
 /// Read one framed backend message: 1-byte tag, Int32 self-inclusive length,
 /// then the payload. Returns the tag as an `Int` and the payload bytes.
 async fn PgConn::read_message(self : PgConn) -> (Int32, Bytes) raise DbError {
-  let head = (self.stream : &@io.Reader).read_exactly(5) catch {
+  let head = self.stream.read_exactly(5) catch {
     e => raise @moondb.ConnectError("read header: \{e}")
   }
   if head.length() < 5 {
@@ -143,7 +143,7 @@ async fn PgConn::read_message(self : PgConn) -> (Int32, Bytes) raise DbError {
   let payload = if body_len == 0 {
     b""
   } else {
-    (self.stream : &@io.Reader).read_exactly(body_len) catch {
+    self.stream.read_exactly(body_len) catch {
       e => raise @moondb.ConnectError("read body: \{e}")
     }
   }
@@ -630,7 +630,7 @@ pub async fn PgConn::close(self : PgConn) -> Unit {
   // Best-effort Terminate, protected from cancellation so a shutting-down task
   // still sends it before the socket is dropped.
   @async.protect_from_cancel(() => {
-    (self.stream : &@io.Writer).write(build_terminate()) catch {
+    self.stream.write(build_terminate()) catch {
       _ => ()
     }
   })
@@ -740,6 +740,21 @@ pub fn PgConn::parameter(self : PgConn, name : String) -> String? {
 /// The backend process id, from BackendKeyData.
 pub fn PgConn::backend_pid(self : PgConn) -> Int32 {
   self.pid
+}
+
+///|
+/// Whether [`close`](PgConn::close) has been called. A closed connection refuses
+/// further statements with [`@moondb.Closed`].
+pub fn PgConn::is_closed(self : PgConn) -> Bool {
+  self.closed
+}
+
+///|
+/// Whether a [`PgRowStream`] is still outstanding. While one is, this connection
+/// refuses new statements — the wire is a single-statement pipeline — until the
+/// stream is drained or [closed](PgRowStream::close).
+pub fn PgConn::is_streaming(self : PgConn) -> Bool {
+  self.streaming
 }
 
 ///|
