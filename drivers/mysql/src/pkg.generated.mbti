@@ -15,6 +15,12 @@ pub fn build_handshake_response(Handshake, String, Bytes, String, ssl? : Bool) -
 
 pub fn build_ssl_request(String) -> Bytes
 
+pub fn build_stmt_close(Int32) -> Bytes
+
+pub fn build_stmt_execute(Int32, Array[@moondb.Value]) -> Bytes
+
+pub fn build_stmt_prepare(String) -> Bytes
+
 pub fn build_text_rows(Array[ColumnDef], Array[Bytes]) -> Array[@moondb.Row] raise MysqlError
 
 pub fn bytes_to_string(Bytes) -> String
@@ -40,6 +46,8 @@ pub let client_ssl : Int32
 pub let client_transactions : Int32
 
 pub fn concat_bytes(Bytes, Bytes) -> Bytes
+
+pub fn decode_binary_row(Bytes, Array[ColumnDef]) -> @moondb.Row raise MysqlError
 
 pub fn decode_text_value(Bytes?, ColumnDef) -> @moondb.Value raise MysqlError
 
@@ -84,6 +92,8 @@ pub fn parse_ok(Bytes) -> OkPacket raise MysqlError
 pub fn parse_rsa_public_key(String) -> @rsa.PublicKey raise MysqlError
 
 pub fn parse_server_version(String) -> (ServerKind, String)
+
+pub fn parse_stmt_prepare_ok(Bytes) -> StmtOk raise MysqlError
 
 pub fn put_lenenc_bytes(@buffer.Buffer, Bytes) -> Unit
 
@@ -177,6 +187,12 @@ pub fn ServerKind::output(Self, &Logger) -> Unit
 pub fn ServerKind::to_repr(Self) -> @debug.Repr
 pub fn ServerKind::to_string(Self) -> String
 pub impl Show for ServerKind
+
+pub(all) struct StmtOk {
+  id : Int32
+  num_columns : Int32
+  num_params : Int32
+}
 
 // Type aliases
 

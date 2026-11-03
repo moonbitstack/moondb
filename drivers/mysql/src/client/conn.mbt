@@ -465,13 +465,151 @@ async fn MysqlConn::command(self : MysqlConn, query_bytes : Bytes) -> Outcome {
 }
 
 ///|
-/// Run a non-row statement (`params` bound as escaped literals) and report the
-/// rows affected and last insert id.
+/// A prepared statement's server-side handle.
+priv struct Prepared {
+  id : Int32
+}
+
+///|
+/// COM_STMT_PREPARE: allocate a server-side statement for `sql`, consuming the
+/// parameter and column definitions up to their EOF packets.
+async fn MysqlConn::prepare(self : MysqlConn, sql : String) -> Prepared {
+  if self.closed {
+    raise @moondb.Closed
+  }
+  if self.streaming {
+    raise @moonmysql.ProtocolError(
+      "a query stream is still open on this connection",
+    )
+  }
+  self.write_packet(0, @moonmysql.build_stmt_prepare(sql))
+  let first = self.read_packet()
+  if @moonmysql.is_err_packet(first) {
+    raise @moonmysql.parse_err(first)
+  }
+  let ok = @moonmysql.parse_stmt_prepare_ok(first)
+  for _ in 0..<ok.num_params {
+    @moonmysql.parse_column_def(self.read_packet()) |> ignore
+  }
+  if ok.num_params > 0 {
+    let eof = self.read_packet()
+    guard @moonmysql.is_eof_packet(eof) else {
+      raise @moonmysql.ProtocolError("expected EOF after statement parameters")
+    }
+  }
+  for _ in 0..<ok.num_columns {
+    @moonmysql.parse_column_def(self.read_packet()) |> ignore
+  }
+  if ok.num_columns > 0 {
+    let eof = self.read_packet()
+    guard @moonmysql.is_eof_packet(eof) else {
+      raise @moonmysql.ProtocolError("expected EOF after statement columns")
+    }
+  }
+  { id: ok.id, }
+}
+
+///|
+async fn MysqlConn::stmt_close(self : MysqlConn, id : Int32) -> Unit {
+  self.write_packet(0, @moonmysql.build_stmt_close(id))
+}
+
+///|
+/// Run a prepared statement and materialise its rows from the binary protocol.
+async fn MysqlConn::read_prepared_rows(
+  self : MysqlConn,
+  id : Int32,
+  params : Array[@moondb.Value],
+) -> Array[@moondb.Row] {
+  self.write_packet(0, @moonmysql.build_stmt_execute(id, params))
+  let first = self.read_packet()
+  if @moonmysql.is_err_packet(first) {
+    raise @moonmysql.parse_err(first)
+  }
+  if @moonmysql.is_ok_packet(first) {
+    return []
+  }
+  let reader = @moonmysql.PacketReader::new(first)
+  let count = reader.lenenc_uint().to_int()
+  let columns : Array[@moonmysql.ColumnDef] = []
+  for _ in 0..<count {
+    columns.push(@moonmysql.parse_column_def(self.read_packet()))
+  }
+  let after = self.read_packet()
+  guard @moonmysql.is_eof_packet(after) else {
+    raise @moonmysql.ProtocolError("expected EOF after result columns")
+  }
+  let rows : Array[@moondb.Row] = []
+  for ;; {
+    let p = self.read_packet()
+    if @moonmysql.is_err_packet(p) {
+      raise @moonmysql.parse_err(p)
+    }
+    if @moonmysql.is_eof_packet(p) {
+      if @moonmysql.has_more_results(p) {
+        raise @moonmysql.UnsupportedError(
+          "the server returned more than one result set; run one statement per query",
+        )
+      }
+      break
+    }
+    rows.push(@moonmysql.decode_binary_row(p, columns))
+  }
+  rows
+}
+
+///|
+async fn MysqlConn::prepared_query(
+  self : MysqlConn,
+  sql : String,
+  params : Array[@moondb.Value],
+) -> Array[@moondb.Row] {
+  let stmt = self.prepare(sql)
+  errdefer self.stmt_close(stmt.id)
+  let rows = self.read_prepared_rows(stmt.id, params)
+  self.stmt_close(stmt.id)
+  rows
+}
+
+///|
+async fn MysqlConn::prepared_execute(
+  self : MysqlConn,
+  sql : String,
+  params : Array[@moondb.Value],
+) -> @moondb.ExecResult {
+  let stmt = self.prepare(sql)
+  errdefer self.stmt_close(stmt.id)
+  self.write_packet(0, @moonmysql.build_stmt_execute(stmt.id, params))
+  let first = self.read_packet()
+  if @moonmysql.is_err_packet(first) {
+    raise @moonmysql.parse_err(first)
+  }
+  if !@moonmysql.is_ok_packet(first) {
+    raise @moonmysql.ProtocolError(
+      "execute() was given a row-returning statement; use query()",
+    )
+  }
+  let ok = @moonmysql.parse_ok(first)
+  let result = @moondb.ExecResult::{
+    rows_affected: ok.affected_rows,
+    last_insert_id: ok.last_insert_id,
+  }
+  self.stmt_close(stmt.id)
+  result
+}
+
+///|
+/// Run a non-row statement and report the rows affected and last insert id. With
+/// bound `params` it uses a prepared statement (binary protocol, out-of-band
+/// binding); without, the text protocol.
 pub async fn MysqlConn::execute(
   self : MysqlConn,
   sql : String,
   params : Array[@moondb.Value],
 ) -> @moondb.ExecResult {
+  if params.length() > 0 {
+    return self.prepared_execute(sql, params)
+  }
   match
     self.command(@moonmysql.bind_params(sql, params, mode=self.quote_mode)) {
     Exec(ok) =>
@@ -487,12 +625,17 @@ pub async fn MysqlConn::execute(
 }
 
 ///|
-/// Run a row-returning statement and materialise every [`@moondb.Row`].
+/// Run a row-returning statement and materialise every [`@moondb.Row`]. With
+/// bound `params` it uses a prepared statement (binary protocol); without, the
+/// text protocol.
 pub async fn MysqlConn::query(
   self : MysqlConn,
   sql : String,
   params : Array[@moondb.Value],
 ) -> Array[@moondb.Row] {
+  if params.length() > 0 {
+    return self.prepared_query(sql, params)
+  }
   match
     self.command(@moonmysql.bind_params(sql, params, mode=self.quote_mode)) {
     Rows(columns, row_payloads) =>
