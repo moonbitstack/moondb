@@ -7,7 +7,7 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-164%20passing-2ea44f)](#tests)
+[![tests](https://img.shields.io/badge/tests-184%20passing-2ea44f)](#tests)
 [![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -157,9 +157,9 @@ pub impl @moondb.Driver for MyConn with execute(self, sql, params) {
 
 v0.1 fixes the smallest contract that a relational backend and a query layer both need, so it can stabilise. Planned, additive extensions (none of which change the v0.1 surface):
 
-- **Prepared statements** — PostgreSQL runs the extended-query protocol with `$n` placeholders; a rebindable `Stmt` handle and the MySQL binary protocol (`COM_STMT_PREPARE`) are still to come.
-- **Server-side cursors** — `Cursor` / `AsyncCursor` stream rows today; a PostgreSQL portal that fetches in batches is still to come.
-- **TLS on the wire drivers** — both speak cleartext TCP today; TLS is planned.
+- **Prepared statements** — both wire drivers bind out-of-band now (PostgreSQL runs the extended-query protocol, MySQL uses `COM_STMT_PREPARE` and the binary protocol); a public rebindable `Stmt` handle is still to come.
+- **Server-side cursors** — `Cursor` / `AsyncCursor` stream rows, and PostgreSQL `DECLARE` / `FETCH` cursors are available; a portal that fetches in batches is still to come.
+- **Streaming COPY** — the PostgreSQL driver runs `COPY … TO STDOUT` / `FROM STDIN` over the copy sub-protocol; a public streaming source/sink is still to come.
 - **Named parameters** and **nested transactions (savepoints)** as a layer over the flat `begin`/`commit`/`rollback`.
 
 ## Tests
