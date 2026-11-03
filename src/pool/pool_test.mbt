@@ -42,6 +42,61 @@ test "pool: an idle connection is reused, not reopened" {
 }
 
 ///|
+test "pool: overflow opens above max_size and retires the extra on release" {
+  let opened = [0]
+  let pool = @pool.Pool::new(
+    () => {
+      opened[0] = opened[0] + 1
+      @moondb.MockDriver::new()
+    },
+    max_size=1,
+    overflow=2,
+  )
+  let a = pool.acquire()
+  let b = pool.acquire()
+  let c = pool.acquire()
+  assert_eq(opened[0], 3)
+  assert_eq(pool.open_count(), 3)
+  assert_eq(pool.overflow(), 2)
+  // The ceiling is max_size + overflow, so a fourth still has no room.
+  let exhausted = try {
+    pool.acquire() |> ignore
+    false
+  } catch {
+    QueryError(_) => true
+    _ => false
+  }
+  assert_eq(exhausted, true)
+  // Returning the overflow connections retires them back to the steady ceiling.
+  pool.release(c)
+  pool.release(b)
+  assert_eq(pool.open_count(), 1)
+  pool.release(a)
+  assert_eq(pool.idle_count(), 1)
+}
+
+///|
+test "pool: reset runs on release and a failing reset closes the connection" {
+  let resets = [0]
+  let fail = [false]
+  let pool = @pool.Pool::new(() => @moondb.MockDriver::new(), max_size=2, reset=_db => {
+    resets[0] = resets[0] + 1
+    if fail[0] {
+      raise QueryError("reset failed")
+    }
+  })
+  let a = pool.acquire()
+  pool.release(a)
+  assert_eq(resets[0], 1)
+  assert_eq(pool.idle_count(), 1)
+  let b = pool.acquire()
+  fail[0] = true
+  pool.release(b)
+  // A reset that raises means the connection is not safe to reuse.
+  assert_eq(pool.open_count(), 0)
+}
+
+///|
 test "pool: opens up to max_size distinct connections, then exhausts" {
   let (pool, opened) = counting_pool(max_size=2)
   let a = pool.acquire()

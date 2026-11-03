@@ -48,12 +48,14 @@ pub struct Pool[D] {
   priv make : () -> D raise @moondb.DbError
   priv books : @moonpool.Pool[D]
   priv max_size : Int32
+  priv overflow : Int32
   priv max_lifetime_ms : Int64
   priv pre_ping : Bool
   priv acquire_timeout_ms : Int64
   priv clock : () -> Int64
   priv roll : () -> Double
   priv cpu : () -> Int32
+  priv reset : ((D) -> Unit raise @moondb.DbError)?
   priv mut closed : Bool
 }
 
@@ -84,11 +86,13 @@ pub struct Pool[D] {
 pub fn[D] Pool::new(
   make : () -> D raise @moondb.DbError,
   max_size~ : Int32 = 10,
+  overflow~ : Int32 = 0,
   max_lifetime_ms~ : Int64 = 0,
   pre_ping~ : Bool = false,
   acquire_timeout_ms~ : Int64 = 0,
   clock~ : () -> Int64 = fn() { 0L },
   ward~ : @moonpool.Ward = @moonpool.ward,
+  reset? : (D) -> Unit raise @moondb.DbError,
   rand? : () -> Double,
   cpu? : () -> Int32,
 ) -> Pool[D] raise @moondb.DbError {
@@ -97,13 +101,18 @@ pub fn[D] Pool::new(
       "pool max_size must be positive, got " + max_size.to_string(),
     )
   }
+  if overflow < 0 {
+    raise QueryError("pool overflow must not be negative")
+  }
   if max_lifetime_ms < 0L {
     raise QueryError("pool max_lifetime_ms must not be negative")
   }
   // No cap on idle connections and no idle timeout: this pool keeps every
   // connection it opened until it ages out, fails a probe, or the pool closes.
+  // `overflow` raises the live ceiling above `max_size`; `release` retires a
+  // connection back down to the steady-state ceiling rather than idling it.
   let limits = @moonpool.Limits::new(
-    size=max_size,
+    size=max_size + overflow,
     idle=0,
     keep=@moonpool.forever,
     life=@moondate.Span::new(millis=max_lifetime_ms),
@@ -119,12 +128,14 @@ pub fn[D] Pool::new(
     make,
     books: @moonpool.Pool::new(limits~, ward~),
     max_size,
+    overflow,
     max_lifetime_ms,
     pre_ping,
     acquire_timeout_ms,
     clock,
     roll,
     cpu: cpu.unwrap_or(fn() { 0 }),
+    reset,
     closed: false,
   }
 }
@@ -160,6 +171,12 @@ pub fn[D] Pool::max_size(self : Pool[D]) -> Int32 {
 /// The configured maximum connection lifetime in milliseconds (`0` = unlimited).
 pub fn[D] Pool::max_lifetime_ms(self : Pool[D]) -> Int64 {
   self.max_lifetime_ms
+}
+
+///|
+/// How many connections may be opened above `max_size` when the pool is busy.
+pub fn[D] Pool::overflow(self : Pool[D]) -> Int32 {
+  self.overflow
 }
 
 ///|
@@ -292,6 +309,32 @@ fn[D : @moondb.Driver] Pool::next(
 /// outlives `close_all`.
 pub fn[D : @moondb.Driver] Pool::release(self : Pool[D], conn : D) -> Unit {
   if self.closed {
+    self.books.drop(conn)
+    conn.close()
+    return
+  }
+  // Reset before the connection is reusable: a callback that rolls back an open
+  // transaction, clears session state, or fails the probe. A reset that raises
+  // means the connection is not safe to hand out again, so it is closed.
+  match self.reset {
+    Some(f) => {
+      let ok = try {
+        f(conn)
+        true
+      } catch {
+        _ => false
+      }
+      if !ok {
+        self.books.drop(conn)
+        conn.close()
+        return
+      }
+    }
+    None => ()
+  }
+  // Keep the open set at the steady-state ceiling: a connection that came from
+  // the overflow allowance is retired on return instead of staying open.
+  if self.books.live() > self.max_size {
     self.books.drop(conn)
     conn.close()
     return
