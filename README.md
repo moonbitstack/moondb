@@ -7,8 +7,8 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-19%20passing-2ea44f)](#tests)
-[![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moonorm/db/)
+[![tests](https://img.shields.io/badge/tests-164%20passing-2ea44f)](#tests)
+[![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -68,6 +68,10 @@ moon add moonbitstack/moondb
 `execute` and `query` both take `(sql, params)`. The SQL string carries **positional placeholders** and `params` supplies one `Value` per placeholder, **in order**. Values are bound out-of-band by the driver and are **never** spliced into the SQL text — that is what makes a moondb-based stack injection-safe all the way to the wire.
 
 The placeholder *token* is the driver's dialect (`?` for SQLite/MySQL, `$1`, `$2`, … for PostgreSQL); moondb fixes the *calling convention* — an ordered `Array[Value]` — not the spelling.
+
+### Value cases
+
+`Value` is a closed sum every backend maps onto: `Null`, `Bool`, `Int`, `Int64`, `Double`, `Text` and `Blob`, plus `Time` (ISO-8601 text), `Numeric` (exact decimal text, no `Double` rounding), `Uuid` (16 raw bytes), `Json` (JSON text) and `Array` (elementwise, including nested arrays). Temporal values cross the boundary as normalized ISO-8601 text rather than a struct, so this interface package stays dependency-free; a caller parses them with whichever date-time library it likes. The dedicated accessors are `row.time`, `row.numeric`, `row.uuid`, `row.json` and `row.array` (each with a `_by` name variant).
 
 ## Quickstart
 
@@ -144,6 +148,7 @@ pub impl @moondb.Driver for MyConn with execute(self, sql, params) {
 - **Why raise, not `Result`.** Typed accessors and driver calls `raise DbError` rather than returning `Result[_, DbError]`, so a decode bug or a dropped connection surfaces at the call site instead of being silently swallowed. A caller opts into recovery with `try`/`catch`.
 - **Typed accessors are strict.** `row.int(i)` raises `TypeError` if the cell is not an integer — including when it is `NULL`. Read a nullable column as `T?` with `read`, or guard it with `is_null` first. Integer→integer and integer→double conversions are allowed and lossless; `int` narrows an `Int64` and says so.
 - **`DbError` is `pub(all)`.** A plain `pub suberror` can be *caught* from another package but not *constructed* — which would stop out-of-tree drivers from raising it. `pub(all)` opens the constructors.
+- **`DbError` carries the server's own classification.** Besides `ConnectError` / `QueryError` / `TypeError` / `Closed`, a `Server` case carries a `ServerDetail`: the five-character SQLSTATE, the vendor error number, and the server's message, detail and hint. `DbError::kind()` maps any failure onto a coarse `ErrorKind` (`Integrity`, `Programming`, `Operational`, `Data`, `Internal`, `NotSupported`, …) and `sqlstate()` / `code()` expose the raw fields, so a caller can branch on the class instead of parsing a message.
 - **There are two driver traits, on purpose.** `Driver` is synchronous, which is right for a backend whose calls block in C (moonsqlite steps a prepared statement and returns). A backend reached over TCP cannot be written that way: MoonBit's only socket stack is async-only, and an `async fn` cannot be called from a synchronous one. A wire driver forced to conform to `Driver` can do nothing but raise from every method — and because `ping` is a *defaulted* method built on `query`, it swallows that raise into `false`, so a `Pool` with `pre_ping` judges every one of its connections permanently unhealthy. `AsyncDriver` is the seam for those backends: the same eight operations, each awaited. It is a peer of `Driver`, not a replacement — a synchronous backend keeps implementing `Driver` and never becomes async. Declaring async methods pulls in no async runtime, so moondb stays dependency-free and still compiles on every backend; only a driver that implements the trait, and a caller that runs it in an event loop, need one.
 
 - **The pool is synchronous, and its counting is moonpool's.** `@pool.Pool[D]` reuses idle connections under a size ceiling, evicts a connection that fails its `pre_ping` probe or outlives `max_lifetime` (age measured by an injected `clock`, the way `database/sql` swaps `nowFunc` in tests), and offers a non-blocking `try_acquire`. Because moondb's base contract is sync and the pure backends have no threads, an exhausted `acquire` fails immediately rather than blocking — the `acquire_timeout` is the budget an async driver layers real waiting on top of. `ping` is a default `Driver` method (`SELECT 1`), so every driver gets a health probe for free. The bookkeeping underneath — how many are live, which are idle, when each was born — is [moonpool](https://github.com/moonbitstack/moonpool)'s `Pool`, and so is the optional `ward` in front of the database: a backoff after failed connects (`acquire` then raises `ConnectError` until the delay has passed), a token bucket spacing reconnections, a breaker that stops connecting to a failing backend, a shedder. This package adds only opening, closing and probing. It is a separate package because that dependency is the pool's alone: `import { "moonbitstack/moondb/pool" }` where a pool is wanted, and the interface stays dependency-free where it is not.
@@ -152,9 +157,9 @@ pub impl @moondb.Driver for MyConn with execute(self, sql, params) {
 
 v0.1 fixes the smallest contract that a relational backend and a query layer both need, so it can stabilise. Planned, additive extensions (none of which change the v0.1 surface):
 
-- **Prepared statements** — a `Stmt` handle for repeated execution with rebinding.
-- **Streaming rows** — a `Rows` cursor so large result sets need not fully materialise.
-- **A temporal `Value` case** — dates/times currently ride as ISO-8601 `Text`; a dedicated case (with a decided epoch/precision) will follow.
+- **Prepared statements** — PostgreSQL runs the extended-query protocol with `$n` placeholders; a rebindable `Stmt` handle and the MySQL binary protocol (`COM_STMT_PREPARE`) are still to come.
+- **Server-side cursors** — `Cursor` / `AsyncCursor` stream rows today; a PostgreSQL portal that fetches in batches is still to come.
+- **TLS on the wire drivers** — both speak cleartext TCP today; TLS is planned.
 - **Named parameters** and **nested transactions (savepoints)** as a layer over the flat `begin`/`commit`/`rollback`.
 
 ## Tests
