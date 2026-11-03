@@ -46,6 +46,12 @@ pub fn build_bind_named(String, String, Array[@moondb.Value]) -> Bytes
 
 pub fn build_cancel_request(Int32, Int32) -> Bytes
 
+pub fn build_copy_data(Bytes) -> Bytes
+
+pub fn build_copy_done() -> Bytes
+
+pub fn build_copy_fail(String) -> Bytes
+
 pub fn build_describe_portal() -> Bytes
 
 pub fn build_execute() -> Bytes
@@ -122,6 +128,8 @@ pub async fn PgConn::close(Self) -> Unit
 pub async fn PgConn::close_cursor(Self, String) -> Unit raise @moondb.DbError
 pub async fn PgConn::commit(Self) -> Unit raise @moondb.DbError
 pub async fn PgConn::connect(String, Int32, String, String, String, tls? : @tls.Client) -> Self raise @moondb.DbError
+pub async fn PgConn::copy_in(Self, String, Bytes) -> @moondb.ExecResult raise @moondb.DbError
+pub async fn PgConn::copy_out(Self, String) -> Bytes raise @moondb.DbError
 pub async fn PgConn::declare_cursor(Self, String, String) -> Unit raise @moondb.DbError
 pub async fn PgConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
 pub async fn PgConn::fetch_cursor(Self, String, Int32) -> Array[@moondb.Row] raise @moondb.DbError

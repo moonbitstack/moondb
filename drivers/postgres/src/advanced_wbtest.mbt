@@ -31,3 +31,13 @@ test "quote_ident doubles an embedded double quote" {
 test "escape_sql_literal doubles an embedded single quote" {
   assert_eq(escape_sql_literal("o'brien"), "o''brien")
 }
+
+///|
+test "CopyData and CopyDone are framed with tags 'd' and 'c'" {
+  let d = build_copy_data(b"a,b\n")
+  assert_eq(d[0].to_int(), 0x64) // 'd'
+  assert_eq(d.length(), 5 + 4) // tag + length + 4 payload bytes
+  let c = build_copy_done()
+  assert_eq(c[0].to_int(), 0x63) // 'c'
+  assert_eq(c.length(), 5)
+}

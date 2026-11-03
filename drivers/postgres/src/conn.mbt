@@ -891,4 +891,105 @@ fn escape_sql_literal(s : String) -> String {
 }
 
 ///|
+/// Run a `COPY … TO STDOUT` statement and return the bytes the server streams.
+pub async fn PgConn::copy_out(
+  self : PgConn,
+  sql : String,
+) -> Bytes raise DbError {
+  if self.closed {
+    raise @moondb.Closed
+  }
+  if self.streaming {
+    raise @moondb.QueryError(
+      "a query stream is still open on this connection; drain it or call close()",
+    )
+  }
+  self.send_statement(sql, [])
+  let out = Buffer()
+  for ;; {
+    let (tag, payload) = self.read_message()
+    match tag {
+      // 'd' CopyData
+      100 => out.write_bytes(payload[:])
+      // 'Z' ReadyForQuery
+      90 => return out.to_bytes()
+      69 => {
+        let detail = parse_error_detail(payload)
+        self.drain_until_ready()
+        raise @moondb.Server(detail)
+      }
+      83 => {
+        let r = ByteReader::new(payload)
+        self.params.set(r.cstring(), r.cstring())
+      }
+      _ => ()
+    }
+  }
+}
+
+///|
+/// Run a `COPY … FROM STDIN` statement, streaming `data` to the server, and
+/// report the command tag's affected-row count.
+pub async fn PgConn::copy_in(
+  self : PgConn,
+  sql : String,
+  data : Bytes,
+) -> @moondb.ExecResult raise DbError {
+  if self.closed {
+    raise @moondb.Closed
+  }
+  if self.streaming {
+    raise @moondb.QueryError(
+      "a query stream is still open on this connection; drain it or call close()",
+    )
+  }
+  self.send_statement(sql, [])
+  let mut command_tag = ""
+  let mut sent = false
+  for ;; {
+    let (tag, payload) = self.read_message()
+    match tag {
+      // 'G' CopyInResponse — now send the data, in chunks, then CopyDone.
+      71 =>
+        if !sent {
+          sent = true
+          let chunk = 65536
+          let mut off = 0
+          while off < data.length() {
+            let end = if off + chunk < data.length() {
+              off + chunk
+            } else {
+              data.length()
+            }
+            self.write_all(build_copy_data(data[off:end].to_owned()))
+            off = end
+          }
+          self.write_all(build_copy_done())
+        }
+      // 'C' CommandComplete
+      67 => {
+        let r = ByteReader::new(payload)
+        command_tag = r.cstring()
+      }
+      // 'Z' ReadyForQuery
+      90 =>
+        return @moondb.ExecResult::{
+          rows_affected: command_tag_rows(command_tag),
+          last_insert_id: 0,
+        }
+      69 => {
+        let detail = parse_error_detail(payload)
+        self.drain_until_ready()
+        raise @moondb.Server(detail)
+      }
+      83 => {
+        let r = ByteReader::new(payload)
+        self.params.set(r.cstring(), r.cstring())
+      }
+      _ => ()
+    }
+  }
+}
+
+///|
 pub extend PgConn with @moondb.AsyncDriver::{ping}

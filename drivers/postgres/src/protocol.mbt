@@ -228,6 +228,26 @@ pub fn build_sync() -> Bytes {
 }
 
 ///|
+/// CopyData ('d'): one chunk of COPY data.
+pub fn build_copy_data(chunk : Bytes) -> Bytes {
+  frame(b'd', chunk)
+}
+
+///|
+/// CopyDone ('c'): the client has sent every COPY chunk.
+pub fn build_copy_done() -> Bytes {
+  frame(b'c', b"")
+}
+
+///|
+/// CopyFail ('f'): abort a COPY FROM STDIN with a message.
+pub fn build_copy_fail(message : String) -> Bytes {
+  let w = MsgWriter::new()
+  w.cstring(message)
+  frame(b'f', w.to_bytes())
+}
+
+///|
 /// Terminate ('X'): ask the backend to close the connection.
 pub fn build_terminate() -> Bytes {
   frame(b'X', b"")
