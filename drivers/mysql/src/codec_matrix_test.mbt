@@ -176,3 +176,11 @@ test "build_text_rows decodes int, bigint, NULL, and binary blob columns" {
 fn string_to_utf8(s : String) -> Bytes {
   @utf8.encode(s)
 }
+
+///|
+test "eof_status reads the status word and flags more results" {
+  // 0xFE, warnings = 0, status = 0x0002 (autocommit): one result set.
+  assert_eq(@moonmysql.eof_status(b"\xfe\x00\x00\x02\x00"), 0x0002)
+  // status = 0x000A sets SERVER_MORE_RESULTS_EXISTS (0x0008).
+  assert_eq(@moonmysql.has_more_results(b"\xfe\x00\x00\x0a\x00"), true)
+}

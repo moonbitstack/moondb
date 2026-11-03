@@ -259,7 +259,7 @@ pub fn build_handshake_response(
   let buf = Buffer()
   put_uint_le(buf, caps.to_int64(), 4)
   put_uint_le(buf, 0x01000000L, 4) // max packet size = 16 MiB
-  buf.write_byte(b'\x21') // charset utf8_general_ci (33)
+  buf.write_byte(b'\x2d') // charset utf8mb4_general_ci (45), not utf8mb3
   for _ in 0..<23 {
     buf.write_byte(b'\x00')
   }

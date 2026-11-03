@@ -330,7 +330,13 @@ async fn MysqlConn::command(self : MysqlConn, query_bytes : Bytes) -> Outcome {
     raise @moonmysql.parse_err(first)
   }
   if @moonmysql.is_ok_packet(first) {
-    return Exec(@moonmysql.parse_ok(first))
+    let ok = @moonmysql.parse_ok(first)
+    if (ok.status & @moonmysql.server_more_results_exists) != 0 {
+      raise @moonmysql.UnsupportedError(
+        "the server returned more than one result set; run one statement per query",
+      )
+    }
+    return Exec(ok)
   }
   if first.length() > 0 && first[0].to_int() == 0xFB {
     raise @moonmysql.UnsupportedError("LOCAL INFILE is not supported")
@@ -357,6 +363,11 @@ async fn MysqlConn::command(self : MysqlConn, query_bytes : Bytes) -> Outcome {
       raise @moonmysql.parse_err(p)
     }
     if @moonmysql.is_eof_packet(p) {
+      if @moonmysql.has_more_results(p) {
+        raise @moonmysql.UnsupportedError(
+          "the server returned more than one result set; run one statement per query",
+        )
+      }
       break
     }
     rows.push(p)
@@ -490,6 +501,11 @@ pub async fn MysqlRowStream::next(self : MysqlRowStream) -> @moondb.Row? {
   }
   if @moonmysql.is_eof_packet(packet) {
     self.finish()
+    if @moonmysql.has_more_results(packet) {
+      raise @moonmysql.UnsupportedError(
+        "the server returned more than one result set; run one statement per query",
+      )
+    }
     return None
   }
   Some(@moonmysql.build_text_rows(self.columns, [packet])[0])

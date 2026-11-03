@@ -95,6 +95,28 @@ pub fn is_eof_packet(payload : Bytes) -> Bool {
 }
 
 ///|
+/// `SERVER_MORE_RESULTS_EXISTS`: the status flag that says another result set
+/// follows the one just terminated.
+pub let server_more_results_exists : Int32 = 0x0008
+
+///|
+/// The status-flags word of an EOF packet (`0xFE`, warnings LE16, status LE16),
+/// or `0` for a packet that is not a protocol-41 EOF.
+pub fn eof_status(payload : Bytes) -> Int32 {
+  if payload.length() >= 5 {
+    payload[3].to_int() + payload[4].to_int() * 256
+  } else {
+    0
+  }
+}
+
+///|
+/// Whether an EOF packet's status word says another result set follows.
+pub fn has_more_results(payload : Bytes) -> Bool {
+  (eof_status(payload) & server_more_results_exists) != 0
+}
+
+///|
 /// Whether `payload` is an OK packet (first byte `0x00`, at least 7 bytes).
 pub fn is_ok_packet(payload : Bytes) -> Bool {
   payload.length() > 0 && payload[0].to_int() == 0x00 && payload.length() >= 7
