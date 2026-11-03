@@ -115,3 +115,31 @@ test "exec result carries counts and equals structurally" {
   assert_eq(a.rows_affected, 3L)
   assert_eq(a.last_insert_id, 42L)
 }
+
+///|
+test "typed accessors read the temporal, numeric, uuid, json and array cases" {
+  let row : @moondb.Row = {
+    columns: ["t", "n", "u", "j", "a"],
+    values: [
+      @moondb.Value::Time("2026-11-03T00:00:00"),
+      @moondb.Value::Numeric("1.50"),
+      @moondb.Value::Uuid(b"\x00\x11"),
+      @moondb.Value::Json("{}"),
+      @moondb.Value::Array([@moondb.Value::Int(1)]),
+    ],
+  }
+  assert_eq(row.time(0), "2026-11-03T00:00:00")
+  assert_eq(row.numeric_by("n"), "1.50")
+  assert_eq(row.uuid(2).length(), 2)
+  assert_eq(row.json_by("j"), "{}")
+  assert_eq(row.array(4).length(), 1)
+  // reading a Numeric cell as a Time is a TypeError, not a silent empty string.
+  let wrong = try {
+    row.time(1) |> ignore
+    false
+  } catch {
+    TypeError(_) => true
+    _ => false
+  }
+  assert_eq(wrong, true)
+}
