@@ -13,6 +13,9 @@ import {
   "moonbitstack/mooncrypt/kdf/pbkdf2",
   "moonbitstack/moonbase/base16",
   "moonbitstack/moonbase/base64",
+  "moonbitstack/moonnet/tcp",
+  "moonbitstack/moontls/tls",
+  "moonbitstack/moonucd/normalize",
   "moonbitstack/moonvar/fixed",
   "moonbitstack/moondb",
   "moonbitlang/async",
@@ -22,3 +25,7 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/double",
 }
+
+import {
+  "moonbitstack/mooncred/x509",
+} for "wbtest"

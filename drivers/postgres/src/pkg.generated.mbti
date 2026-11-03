@@ -2,8 +2,9 @@
 package "moonbitstack/moonpostgres"
 
 import {
-  "moonbitlang/async/socket",
   "moonbitstack/moondb",
+  "moonbitstack/moonnet/tcp",
+  "moonbitstack/moontls/tls",
 }
 
 // Values
@@ -55,6 +56,8 @@ pub fn build_sasl_initial(String, String) -> Bytes
 
 pub fn build_sasl_response(String) -> Bytes
 
+pub fn build_ssl_request() -> Bytes
+
 pub fn build_startup(String, String) -> Bytes
 
 pub fn build_sync() -> Bytes
@@ -79,7 +82,9 @@ pub fn parse_int64(String) -> Int64?
 
 pub fn pg_md5_password(String, String, Bytes) -> String
 
-pub fn scram_client_final(Bytes, String, String) -> (String, Bytes) raise @moondb.DbError
+pub fn saslprep(String) -> String
+
+pub fn scram_client_final(Bytes, String, String, gs2_header? : String, cbind? : Bytes?) -> (String, Bytes) raise @moondb.DbError
 
 pub fn scram_client_proof(Bytes, Bytes) -> Bytes
 
@@ -93,14 +98,14 @@ pub fn utf8_decode(Bytes) -> String
 
 // Types and methods
 pub struct PgConn {
-  tcp : @socket.Tcp
+  stream : @tcp.Conn
   mut closed : Bool
   mut streaming : Bool
 }
 pub async fn PgConn::begin(Self) -> Unit raise @moondb.DbError
 pub async fn PgConn::close(Self) -> Unit
 pub async fn PgConn::commit(Self) -> Unit raise @moondb.DbError
-pub async fn PgConn::connect(String, Int32, String, String, String) -> Self raise @moondb.DbError
+pub async fn PgConn::connect(String, Int32, String, String, String, tls? : @tls.Client) -> Self raise @moondb.DbError
 pub async fn PgConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
 pub async fn PgConn::ping(Self) -> Bool
 pub async fn PgConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError

@@ -58,6 +58,8 @@ pub fn scram_client_final(
   password : Bytes,
   client_first_bare : String,
   server_first : String,
+  gs2_header~ : String = "n,,",
+  cbind~ : Bytes? = None,
 ) -> (String, Bytes) raise DbError {
   let mut nonce = ""
   let mut salt_b64 = ""
@@ -90,7 +92,19 @@ pub fn scram_client_final(
     rounds=iters,
     len=32,
   )
-  let client_final_wo = "c=biws,r=" + nonce
+  // `c=` is the base64 of the GS2 header concatenated with the channel-binding
+  // data. Without `-PLUS` it is base64("n,,") = "biws"; with it, the header names
+  // the binding type and the data is appended before encoding.
+  let cbind_input = Buffer()
+  cbind_input.write_bytes(@utf8.encode(gs2_header)[:])
+  match cbind {
+    Some(data) => cbind_input.write_bytes(data[:])
+    None => ()
+  }
+  let client_final_wo = "c=" +
+    @base64.encode(cbind_input.to_bytes()) +
+    ",r=" +
+    nonce
   let auth = @utf8.encode(
     client_first_bare + "," + server_first + "," + client_final_wo,
   )
@@ -99,4 +113,47 @@ pub fn scram_client_final(
     client_final_wo + ",p=" + @base64.encode(proof),
     scram_server_signature(salted, auth),
   )
+}
+
+///|
+/// SASLprep (RFC 4013) on a password before SCRAM: map the non-ASCII space
+/// characters to U+0020, drop the "commonly mapped to nothing" code points, then
+/// NFKC-normalize. An ASCII password is returned unchanged, which is the common
+/// case; a non-ASCII one would otherwise derive a different key from the
+/// server's stored verifier.
+pub fn saslprep(password : String) -> String {
+  let sb = StringBuilder()
+  for i in 0..<password.length() {
+    let c = password[i].to_int()
+    if is_mapped_to_space(c) {
+      sb.write_char(' ')
+    } else if is_mapped_to_nothing(c) {
+      // dropped
+    } else {
+      sb.write_char(password[i].unsafe_to_char())
+    }
+  }
+  @normalize.normalize(@normalize.NFKC, sb.to_string()[:])
+}
+
+///|
+fn is_mapped_to_space(c : Int32) -> Bool {
+  c == 0x00A0 ||
+  c == 0x1680 ||
+  (c >= 0x2000 && c <= 0x200A) ||
+  c == 0x202F ||
+  c == 0x205F ||
+  c == 0x3000
+}
+
+///|
+fn is_mapped_to_nothing(c : Int32) -> Bool {
+  c == 0x00AD ||
+  c == 0x034F ||
+  c == 0x1806 ||
+  (c >= 0x180B && c <= 0x180D) ||
+  (c >= 0x200B && c <= 0x200D) ||
+  c == 0x2060 ||
+  (c >= 0xFE00 && c <= 0xFE0F) ||
+  c == 0xFEFF
 }

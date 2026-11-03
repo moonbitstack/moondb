@@ -90,6 +90,17 @@ pub fn build_startup(user : String, database : String) -> Bytes {
 }
 
 ///|
+/// SSLRequest: Int32 length `8`, Int32 request code `80877103`. Sent before the
+/// startup message; the server answers a single byte — `S` to begin a TLS
+/// handshake, `N` to continue in cleartext.
+pub fn build_ssl_request() -> Bytes {
+  let w = MsgWriter::new()
+  w.i32(8)
+  w.i32(80877103)
+  w.to_bytes()
+}
+
+///|
 /// PasswordMessage ('p'): the auth response token (cleartext, or the `md5…`
 /// digest), as a C string.
 pub fn build_password(token : String) -> Bytes {

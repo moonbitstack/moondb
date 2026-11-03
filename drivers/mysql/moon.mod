@@ -38,6 +38,8 @@ import {
   "moonbitstack/mooncred@0.6.7",
   "moonbitstack/moondb@0.2.4",
   "moonbitstack/moonvar@0.2.0",
+  "moonbitstack/moonnet@0.1.8",
+  "moonbitstack/moontls@0.9.12",
   "moonbitlang/async@0.22.5",
 }
 

@@ -184,3 +184,16 @@ test "eof_status reads the status word and flags more results" {
   // status = 0x000A sets SERVER_MORE_RESULTS_EXISTS (0x0008).
   assert_eq(@moonmysql.has_more_results(b"\xfe\x00\x00\x0a\x00"), true)
 }
+
+///|
+test "SSLRequest is 32 bytes with CLIENT_SSL and the utf8mb4 charset" {
+  let req = @moonmysql.build_ssl_request("")
+  assert_eq(req.length(), 32)
+  let caps = req[0].to_int() |
+    (req[1].to_int() << 8) |
+    (req[2].to_int() << 16) |
+    (req[3].to_int() << 24)
+  assert_eq((caps & @moonmysql.client_ssl) != 0, true)
+  // charset byte at offset 8 is utf8mb4_general_ci (45)
+  assert_eq(req[8].to_int(), 45)
+}

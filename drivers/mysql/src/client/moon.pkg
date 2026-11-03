@@ -3,7 +3,10 @@ supported_targets = "+native+wasm"
 import {
   "moonbitstack/moonmysql",
   "moonbitstack/moondb",
+  "moonbitstack/moonnet/tcp",
+  "moonbitstack/moontls/tls",
   "moonbitlang/async",
+  "moonbitlang/async/io",
   "moonbitlang/async/socket",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
@@ -11,4 +14,9 @@ import {
 
 import {
   "moonbitlang/core/string",
+} for "test"
+
+import {
+  "moonbitstack/mooncred/x509",
+  "moonbitstack/moontls/tls",
 } for "test"

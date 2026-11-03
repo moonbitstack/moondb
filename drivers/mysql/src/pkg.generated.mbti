@@ -11,7 +11,9 @@ import {
 // Values
 pub fn bind_params(String, Array[@moondb.Value], mode? : QuoteMode) -> Bytes raise MysqlError
 
-pub fn build_handshake_response(Handshake, String, Bytes, String) -> Bytes raise MysqlError
+pub fn build_handshake_response(Handshake, String, Bytes, String, ssl? : Bool) -> Bytes raise MysqlError
+
+pub fn build_ssl_request(String) -> Bytes
 
 pub fn build_text_rows(Array[ColumnDef], Array[Bytes]) -> Array[@moondb.Row] raise MysqlError
 
@@ -32,6 +34,8 @@ pub let client_plugin_auth : Int32
 pub let client_protocol_41 : Int32
 
 pub let client_secure_connection : Int32
+
+pub let client_ssl : Int32
 
 pub let client_transactions : Int32
 

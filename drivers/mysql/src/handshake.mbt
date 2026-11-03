@@ -31,6 +31,11 @@ pub let client_transactions : Int32 = 0x00002000
 pub let client_secure_connection : Int32 = 0x00008000
 
 ///|
+/// The `CLIENT_SSL` capability flag of the connection handshake: the client will
+/// begin a TLS handshake after an SSLRequest packet.
+pub let client_ssl : Int32 = 0x00000800
+
+///|
 /// The `CLIENT_PLUGIN_AUTH` capability flag of the connection handshake.
 pub let client_plugin_auth : Int32 = 0x00080000
 
@@ -222,6 +227,7 @@ pub fn build_handshake_response(
   user : String,
   password : Bytes,
   database : String,
+  ssl~ : Bool = false,
 ) -> Bytes raise MysqlError {
   let (auth_response, advertised_plugin) = if handshake.auth_plugin ==
     "caching_sha2_password" {
@@ -247,15 +253,7 @@ pub fn build_handshake_response(
       "caching_sha2_password are implemented (client_ed25519 is on the README roadmap)",
     )
   }
-  let mut caps = client_protocol_41 |
-    client_secure_connection |
-    client_plugin_auth |
-    client_long_password |
-    client_transactions |
-    client_long_flag
-  if database.length() > 0 {
-    caps = caps | client_connect_with_db
-  }
+  let caps = client_caps(database, ssl)
   let buf = Buffer()
   put_uint_le(buf, caps.to_int64(), 4)
   put_uint_le(buf, 0x01000000L, 4) // max packet size = 16 MiB
@@ -270,6 +268,42 @@ pub fn build_handshake_response(
     put_string_nul(buf, string_to_bytes(database))
   }
   put_string_nul(buf, string_to_bytes(advertised_plugin))
+  buf.to_bytes()
+}
+
+///|
+/// The capability flags the client advertises. `database` turns on
+/// `CLIENT_CONNECT_WITH_DB`; `ssl` turns on `CLIENT_SSL`. The SSLRequest and the
+/// handshake response must carry the same word, which is why both go through here.
+fn client_caps(database : String, ssl : Bool) -> Int32 {
+  let mut caps = client_protocol_41 |
+    client_secure_connection |
+    client_plugin_auth |
+    client_long_password |
+    client_transactions |
+    client_long_flag
+  if database.length() > 0 {
+    caps = caps | client_connect_with_db
+  }
+  if ssl {
+    caps = caps | client_ssl
+  }
+  caps
+}
+
+///|
+/// The 32-byte SSLRequest payload the client sends before starting TLS: the same
+/// capability word as the handshake response (with `CLIENT_SSL`), the max packet
+/// size, the charset, and 23 reserved zero bytes.
+pub fn build_ssl_request(database : String) -> Bytes {
+  let caps = client_caps(database, true)
+  let buf = Buffer()
+  put_uint_le(buf, caps.to_int64(), 4)
+  put_uint_le(buf, 0x01000000L, 4)
+  buf.write_byte(b'\x2d') // utf8mb4_general_ci
+  for _ in 0..<23 {
+    buf.write_byte(b'\x00')
+  }
   buf.to_bytes()
 }
 

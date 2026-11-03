@@ -29,19 +29,21 @@ pub struct MysqlDriver {
   user : String
   password : String
   database : String
+  tls : @tls.Client?
 }
 
 ///|
 /// Configure a driver. `host` defaults to loopback, `port` to 3306; `password`
-/// and `database` may be empty.
+/// and `database` may be empty. `tls` turns on TLS for the connection.
 pub fn MysqlDriver::new(
   user~ : String,
   password~ : String = "",
   database~ : String = "",
   host~ : String = "127.0.0.1",
   port~ : Int32 = 3306,
+  tls? : @tls.Client,
 ) -> MysqlDriver {
-  { host, port, user, password, database, }
+  { host, port, user, password, database, tls, }
 }
 
 ///|
@@ -110,6 +112,7 @@ fn[T] MysqlDriver::with_conn(
           self.user,
           self.password,
           self.database,
+          tls?=self.tls,
         )
         defer conn.close()
         Ok(op(conn))

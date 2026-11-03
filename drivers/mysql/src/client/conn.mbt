@@ -12,10 +12,10 @@
 /// header; the transport transparently reassembles the `0xFFFFFF` continuation
 /// frames a large payload is split into.
 pub struct MysqlConn {
-  tcp : @socket.Tcp
+  stream : @tcp.Conn
   mut seq : Int32
   mut closed : Bool
-  mut server_kind : @moonmysql.ServerKind
+  server_kind : @moonmysql.ServerKind
   // Set while a `MysqlRowStream` is outstanding — the wire is a per-connection
   // pipeline, so issuing a command before the stream drains would read the old
   // result's leftover packets and desync the connection.
@@ -33,22 +33,33 @@ pub fn MysqlConn::server_kind(self : MysqlConn) -> @moonmysql.ServerKind {
 }
 
 ///|
-/// Read one logical packet payload, reassembling `0xFFFFFF`-length continuation
-/// frames. Updates the connection's last-seen sequence id.
-async fn MysqlConn::read_packet(self : MysqlConn) -> Bytes {
+/// Read one logical packet payload from a stream, reassembling
+/// `0xFFFFFF`-length continuation frames. Returns the payload and the last
+/// sequence id seen.
+async fn read_packet_stream(r : &@io.Reader) -> (Bytes, Int32) {
   let out = Buffer()
+  let mut seq = 0
   for ;; {
-    let hdr = self.tcp.read_exactly(4)
+    let hdr = r.read_exactly(4)
     let len = hdr[0].to_int() | (hdr[1].to_int() << 8) | (hdr[2].to_int() << 16)
-    self.seq = hdr[3].to_int()
+    seq = hdr[3].to_int()
     if len > 0 {
-      out.write_bytes(self.tcp.read_exactly(len)[:])
+      out.write_bytes(r.read_exactly(len)[:])
     }
     if len < 0xFFFFFF {
       break
     }
   }
-  out.to_bytes()
+  (out.to_bytes(), seq)
+}
+
+///|
+/// Read one logical packet payload, reassembling `0xFFFFFF`-length continuation
+/// frames. Updates the connection's last-seen sequence id.
+async fn MysqlConn::read_packet(self : MysqlConn) -> Bytes {
+  let (payload, seq) = read_packet_stream((self.stream : &@io.Reader))
+  self.seq = seq
+  payload
 }
 
 ///|
@@ -60,8 +71,8 @@ async fn MysqlConn::read_packet(self : MysqlConn) -> Bytes {
 /// the split the length silently wraps and the server reads the tail of the payload
 /// as the next packet header. Reachable in practice: a blob is hex-expanded to twice
 /// its size on the way out, so an 8 MB value crosses the boundary.
-async fn MysqlConn::write_packet(
-  self : MysqlConn,
+async fn write_packet_stream(
+  w : &@io.Writer,
   seq : Int32,
   payload : Bytes,
 ) -> Unit {
@@ -75,22 +86,22 @@ async fn MysqlConn::write_packet(
       } else {
         payload.length()
       }
-      self.write_one_packet(s, payload[off:end].to_owned())
+      write_one_packet_stream(w, s, payload[off:end].to_owned())
       s = (s + 1) & 0xFF
       off = end
     }
     if payload.length() % limit == 0 {
-      self.write_one_packet(s, b"")
+      write_one_packet_stream(w, s, b"")
     }
     return
   }
-  self.write_one_packet(seq, payload)
+  write_one_packet_stream(w, seq, payload)
 }
 
 ///|
 /// One wire packet, whose payload is already known to fit the three-byte length.
-async fn MysqlConn::write_one_packet(
-  self : MysqlConn,
+async fn write_one_packet_stream(
+  w : &@io.Writer,
   seq : Int32,
   payload : Bytes,
 ) -> Unit {
@@ -101,7 +112,16 @@ async fn MysqlConn::write_one_packet(
   buf.write_byte(((n >> 16) & 0xFF).to_byte())
   buf.write_byte((seq & 0xFF).to_byte())
   buf.write_bytes(payload[:])
-  self.tcp.write(buf.to_bytes())
+  w.write(buf.to_bytes())
+}
+
+///|
+async fn MysqlConn::write_packet(
+  self : MysqlConn,
+  seq : Int32,
+  payload : Bytes,
+) -> Unit {
+  write_packet_stream((self.stream : &@io.Writer), seq, payload)
 }
 
 ///|
@@ -111,8 +131,11 @@ async fn MysqlConn::write_one_packet(
 ///
 /// mysql_native_password and caching_sha2_password (MySQL 8's default, including
 /// the RSA full-auth path on a cache miss) are handled directly, whether the
-/// server drives them from its default or via an AuthSwitchRequest. A switch to any
-/// other plugin (e.g. client_ed25519, on the README roadmap) raises
+/// server drives them from its default or via an AuthSwitchRequest. With `tls`,
+/// the connection sends an SSLRequest after the greeting and runs the whole
+/// handshake over TLS; the caching_sha2 full-auth step then sends the password
+/// in cleartext under TLS instead of RSA-encrypting it. A switch to any other
+/// plugin (e.g. client_ed25519, on the README roadmap) raises
 /// [`@moonmysql.MysqlError::UnsupportedError`].
 pub async fn MysqlConn::connect(
   host : String,
@@ -120,22 +143,58 @@ pub async fn MysqlConn::connect(
   user : String,
   password : String,
   database : String,
+  tls? : @tls.Client,
 ) -> MysqlConn {
   let addr = @socket.Addr::resolve(host, port~)
   let tcp = @socket.Tcp::connect(addr)
+  // Phase 1 reads the greeting over the raw socket: the SSLRequest that decides
+  // whether the rest runs over TLS can only be sent once the greeting is seen.
+  let (greeting, greeting_seq) = read_packet_stream((tcp : &@io.Reader))
+  let handshake = @moonmysql.parse_handshake(greeting)
+  let use_tls = tls is Some(_)
+  if use_tls && (handshake.capability & @moonmysql.client_ssl) == 0 {
+    tcp.close()
+    raise @moonmysql.UnsupportedError("server does not offer CLIENT_SSL")
+  }
+  let stream = if use_tls {
+    write_packet_stream(
+      (tcp : &@io.Writer),
+      greeting_seq + 1,
+      @moonmysql.build_ssl_request(database),
+    )
+    let client = match tls {
+      Some(c) => c
+      None => abort("tls is Some")
+    }
+    @tcp.Conn::client(tcp, client, host) catch {
+      e => {
+        tcp.close()
+        raise @moonmysql.ProtocolError(
+          "TLS handshake with " + host + ": " + e.to_string(),
+        )
+      }
+    }
+  } else {
+    @tcp.Conn::plain(tcp)
+  }
   let conn = MysqlConn::{
-    tcp,
-    seq: 0,
+    stream,
+    seq: if use_tls {
+      greeting_seq + 1
+    } else {
+      greeting_seq
+    },
     closed: false,
-    server_kind: @moonmysql.ServerKind::MySQL,
+    server_kind: handshake.server_kind,
     streaming: false,
     quote_mode: @moonmysql.QuoteMode::Backslash,
   }
   let pw = @utf8.encode(password[:])
   // Close the socket on any handshake failure — a bad-credentials ERR is the
   // common case, and MoonBit has no fd finalizer to reclaim a leaked socket.
-  errdefer conn.tcp.close()
-  conn.do_handshake(user, pw, database)
+  errdefer conn.stream.close()
+  conn.send_handshake_response(handshake, user, pw, database, ssl=use_tls)
+  conn.finish_auth(handshake, pw, use_tls)
   conn.learn_quoting()
   conn
 }
@@ -179,20 +238,37 @@ async fn MysqlConn::learn_quoting(self : MysqlConn) -> Unit {
 }
 
 ///|
-/// The authentication exchange, run under [`connect`]'s close-on-error guard.
-async fn MysqlConn::do_handshake(
+/// Send the HandshakeResponse41 for `user`/`password`/`database`, carrying
+/// `CLIENT_SSL` when the connection runs over TLS.
+async fn MysqlConn::send_handshake_response(
   self : MysqlConn,
+  handshake : @moonmysql.Handshake,
   user : String,
   pw : Bytes,
   database : String,
+  ssl~ : Bool,
 ) -> Unit {
-  let handshake = @moonmysql.parse_handshake(self.read_packet())
-  self.server_kind = handshake.server_kind
   let response = @moonmysql.build_handshake_response(
-    handshake, user, pw, database,
+    handshake,
+    user,
+    pw,
+    database,
+    ssl~,
   )
-  // The handshake response is sequence id 1 (the server's handshake was 0).
+  // The handshake response follows the greeting (and the SSLRequest, when TLS
+  // was negotiated) on the sequence number.
   self.write_packet(self.seq + 1, response)
+}
+
+///|
+/// The authentication exchange after the handshake response, run under
+/// [`connect`]'s close-on-error guard.
+async fn MysqlConn::finish_auth(
+  self : MysqlConn,
+  handshake : @moonmysql.Handshake,
+  pw : Bytes,
+  tls : Bool,
+) -> Unit {
   let auth = self.read_packet()
   if @moonmysql.is_err_packet(auth) {
     raise @moonmysql.parse_err(auth)
@@ -218,7 +294,7 @@ async fn MysqlConn::do_handshake(
         self.seq + 1,
         @moonmysql.caching_sha2_scramble(pw, new_salt),
       )
-      self.finish_caching_sha2(pw, new_salt, self.read_packet())
+      self.finish_caching_sha2(pw, new_salt, self.read_packet(), tls)
       return
     }
     if plugin == "client_ed25519" {
@@ -241,7 +317,7 @@ async fn MysqlConn::do_handshake(
   // AuthMoreData (lead byte 0x01): the caching_sha2 reply to the fast scramble we
   // already sent in the handshake response.
   if auth.length() >= 1 && auth[0].to_int() == 0x01 {
-    self.finish_caching_sha2(pw, handshake.salt, auth)
+    self.finish_caching_sha2(pw, handshake.salt, auth, tls)
     return
   }
   raise @moonmysql.UnsupportedError("unexpected packet during authentication")
@@ -258,28 +334,41 @@ async fn MysqlConn::finish_caching_sha2(
   pw : Bytes,
   nonce : Bytes,
   more_data : Bytes,
+  tls : Bool,
 ) -> Unit {
   guard more_data.length() >= 2 && more_data[0].to_int() == 0x01 else {
     raise @moonmysql.ProtocolError("caching_sha2: expected AuthMoreData")
   }
   match more_data[1].to_int() {
     0x03 => expect_ok_or_err(self.read_packet()) // fast auth success
-    0x04 => {
-      // Request the server's RSA public key (no TLS ⇒ full auth over RSA).
-      self.write_packet(self.seq + 1, b"\x02")
-      let key_pkt = self.read_packet()
-      guard key_pkt.length() >= 1 && key_pkt[0].to_int() == 0x01 else {
-        raise @moonmysql.ProtocolError("caching_sha2: expected public key")
+    0x04 =>
+      if tls {
+        // Over TLS the password is sent in cleartext (NUL-terminated) rather than
+        // RSA-encrypted: the channel already protects it, and this is the path
+        // MySQL documents for secure connections.
+        let pwz = Buffer()
+        pwz.write_bytes(pw[:])
+        pwz.write_byte(b'\x00')
+        self.write_packet(self.seq + 1, pwz.to_bytes())
+        expect_ok_or_err(self.read_packet())
+      } else {
+        // Request the server's RSA public key (no TLS ⇒ full auth over RSA).
+        self.write_packet(self.seq + 1, b"\x02")
+        let key_pkt = self.read_packet()
+        guard key_pkt.length() >= 1 && key_pkt[0].to_int() == 0x01 else {
+          raise @moonmysql.ProtocolError("caching_sha2: expected public key")
+        }
+        let pem = @moonmysql.bytes_to_string(key_pkt[1:].to_owned())
+        let seed = match @env.rand(20) {
+          Some(b) => b
+          None => raise @moonmysql.ProtocolError("no CSPRNG for the OAEP seed")
+        }
+        let token = @moonmysql.caching_sha2_full_auth_token(
+          pw, nonce, pem, seed,
+        )
+        self.write_packet(self.seq + 1, token)
+        expect_ok_or_err(self.read_packet())
       }
-      let pem = @moonmysql.bytes_to_string(key_pkt[1:].to_owned())
-      let seed = match @env.rand(20) {
-        Some(b) => b
-        None => raise @moonmysql.ProtocolError("no CSPRNG for the OAEP seed")
-      }
-      let token = @moonmysql.caching_sha2_full_auth_token(pw, nonce, pem, seed)
-      self.write_packet(self.seq + 1, token)
-      expect_ok_or_err(self.read_packet())
-    }
     other =>
       raise @moonmysql.ProtocolError(
         "caching_sha2: unexpected status " + other.to_string(),
@@ -558,6 +647,6 @@ pub async fn MysqlConn::rollback(self : MysqlConn) -> Unit {
 pub fn MysqlConn::close(self : MysqlConn) -> Unit {
   if !self.closed {
     self.closed = true
-    self.tcp.close()
+    self.stream.close()
   }
 }

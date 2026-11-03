@@ -13,7 +13,7 @@
 /// before the next begins, as the wire protocol is a strict request/response
 /// pipeline per connection.
 pub struct PgConn {
-  tcp : @socket.Tcp
+  stream : @tcp.Conn
   mut closed : Bool
   // Set while a `PgRowStream` is outstanding. The wire is a strict per-connection
   // pipeline, so a new statement issued before the stream is drained/closed would
@@ -26,16 +26,18 @@ pub struct PgConn {
 /// Open a connection and complete the startup handshake: send StartupMessage,
 /// satisfy the authentication request (trust/`AuthenticationOk`, cleartext, MD5,
 /// or SASL/SCRAM-SHA-256), and drain server parameters up to the first
-/// `ReadyForQuery`. `host` may
-/// be a hostname or a literal IP; `port` is typically 5432. Raises
-/// `ConnectError` on any transport or handshake failure, including an
-/// unsupported auth method.
+/// `ReadyForQuery`. `host` may be a hostname or a literal IP; `port` is typically
+/// 5432. With `tls`, the connection first sends PostgreSQL's SSLRequest and
+/// negotiates TLS (a server that answers `N` is an error, not a silent downgrade),
+/// then runs SCRAM with channel binding when the server offers `-PLUS`. Raises
+/// `ConnectError` on any transport, TLS, or handshake failure.
 pub async fn PgConn::connect(
   host : String,
   port : Int32,
   user : String,
   password : String,
   database : String,
+  tls? : @tls.Client,
 ) -> PgConn raise DbError {
   let addr = @socket.Addr::resolve(host, port~) catch {
     e => raise @moondb.ConnectError("resolve \{host}: \{e}")
@@ -43,18 +45,57 @@ pub async fn PgConn::connect(
   let tcp = @socket.Tcp::connect(addr) catch {
     e => raise @moondb.ConnectError("connect \{host}:\{port}: \{e}")
   }
-  let conn = PgConn::{ tcp, closed: false, streaming: false, }
+  let stream = match tls {
+    None => @tcp.Conn::plain(tcp)
+    Some(client) => {
+      (tcp : &@io.Writer).write(build_ssl_request()) catch {
+        e => {
+          tcp.close()
+          raise @moondb.ConnectError("write SSLRequest: \{e}")
+        }
+      }
+      let answer = (tcp : &@io.Reader).read_exactly(1) catch {
+        e => {
+          tcp.close()
+          raise @moondb.ConnectError("read SSL answer: \{e}")
+        }
+      }
+      if answer.length() != 1 || answer[0].to_int() != 83 {
+        tcp.close()
+        raise @moondb.ConnectError("server refused TLS (answered N)")
+      }
+      @tcp.Conn::client(tcp, client, host) catch {
+        e => {
+          tcp.close()
+          raise @moondb.ConnectError("TLS handshake with \{host}: \{e}")
+        }
+      }
+    }
+  }
+  // The channel-binding data for SCRAM-SHA-256-PLUS is the SHA-256 of the
+  // server's leaf certificate (tls-server-end-point, RFC 5929).
+  let channel = if tls is Some(_) {
+    let peer = stream.peer()
+    if peer.length() > 0 {
+      Some(@sha2.hash(peer[0][:]))
+    } else {
+      None
+    }
+  } else {
+    None
+  }
+  let conn = PgConn::{ stream, closed: false, streaming: false, }
   // Close the socket on any handshake failure (a bad-password ErrorResponse is the
   // common case) — MoonBit has no fd finalizer, so a raise here would leak it.
-  errdefer conn.tcp.close()
+  errdefer conn.stream.close()
   conn.write_all(build_startup(user, database))
-  conn.run_startup(user, password)
+  conn.run_startup(user, password, channel)
   conn
 }
 
 ///|
 async fn PgConn::write_all(self : PgConn, bytes : Bytes) -> Unit raise DbError {
-  (self.tcp : &@io.Writer).write(bytes) catch {
+  (self.stream : &@io.Writer).write(bytes) catch {
     e => raise @moondb.ConnectError("write: \{e}")
   }
 }
@@ -63,7 +104,7 @@ async fn PgConn::write_all(self : PgConn, bytes : Bytes) -> Unit raise DbError {
 /// Read one framed backend message: 1-byte tag, Int32 self-inclusive length,
 /// then the payload. Returns the tag as an `Int` and the payload bytes.
 async fn PgConn::read_message(self : PgConn) -> (Int32, Bytes) raise DbError {
-  let head = (self.tcp : &@io.Reader).read_exactly(5) catch {
+  let head = (self.stream : &@io.Reader).read_exactly(5) catch {
     e => raise @moondb.ConnectError("read header: \{e}")
   }
   if head.length() < 5 {
@@ -80,7 +121,7 @@ async fn PgConn::read_message(self : PgConn) -> (Int32, Bytes) raise DbError {
   let payload = if body_len == 0 {
     b""
   } else {
-    (self.tcp : &@io.Reader).read_exactly(body_len) catch {
+    (self.stream : &@io.Reader).read_exactly(body_len) catch {
       e => raise @moondb.ConnectError("read body: \{e}")
     }
   }
@@ -93,6 +134,7 @@ async fn PgConn::run_startup(
   self : PgConn,
   user : String,
   password : String,
+  channel : Bytes?,
 ) -> Unit raise DbError {
   for ;; {
     let (tag, payload) = self.read_message()
@@ -110,7 +152,7 @@ async fn PgConn::run_startup(
               build_password(pg_md5_password(user, password, salt)),
             )
           }
-          10 => self.run_sasl(password, r)
+          10 => self.run_sasl(password, r, channel)
           other =>
             raise @moondb.ConnectError(
               "unsupported authentication request \{other}",
@@ -141,8 +183,10 @@ async fn PgConn::run_sasl(
   self : PgConn,
   password : String,
   mechs : ByteReader,
+  channel : Bytes?,
 ) -> Unit raise DbError {
   let mut scram = false
+  let mut plus = false
   for ;; {
     let m = mechs.cstring()
     if m == "" {
@@ -151,21 +195,29 @@ async fn PgConn::run_sasl(
     if m == "SCRAM-SHA-256" {
       scram = true
     }
+    if m == "SCRAM-SHA-256-PLUS" {
+      plus = true
+    }
   }
-  guard scram else {
+  let use_plus = channel is Some(_) && plus
+  guard use_plus || scram else {
     raise @moondb.ConnectError("server offers no SCRAM-SHA-256 SASL mechanism")
   }
+  let mech = if use_plus { "SCRAM-SHA-256-PLUS" } else { "SCRAM-SHA-256" }
+  let gs2 = if use_plus { "p=tls-server-end-point,," } else { "n,," }
   let entropy = match @env.rand(18) {
     Some(b) => b
     None => raise @moondb.ConnectError("no CSPRNG for the SCRAM client nonce")
   }
   let client_first_bare = "n=,r=" + @base64.encode(entropy)
-  self.write_all(build_sasl_initial("SCRAM-SHA-256", "n,," + client_first_bare))
+  self.write_all(build_sasl_initial(mech, gs2 + client_first_bare))
   let server_first = self.read_sasl_message(11)
   let (client_final, want_sig) = scram_client_final(
-    @utf8.encode(password),
+    @utf8.encode(saslprep(password)),
     client_first_bare,
     server_first,
+    gs2_header=gs2,
+    cbind=channel,
   )
   self.write_all(build_sasl_response(client_final))
   let server_final = self.read_sasl_message(12)
@@ -515,11 +567,11 @@ pub async fn PgConn::close(self : PgConn) -> Unit {
   // Best-effort Terminate, protected from cancellation so a shutting-down task
   // still sends it before the socket is dropped.
   @async.protect_from_cancel(() => {
-    (self.tcp : &@io.Writer).write(build_terminate()) catch {
+    (self.stream : &@io.Writer).write(build_terminate()) catch {
       _ => ()
     }
   })
-  self.tcp.close()
+  self.stream.close()
 }
 
 ///|
