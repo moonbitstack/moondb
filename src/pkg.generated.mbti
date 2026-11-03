@@ -95,6 +95,8 @@ pub(all) struct Row {
   columns : Array[String]
   values : Array[Value]
 }
+pub fn Row::array(Self, Int32) -> Array[Value] raise DbError
+pub fn Row::array_by(Self, String) -> Array[Value] raise DbError
 pub fn Row::blob(Self, Int32) -> Bytes raise DbError
 pub fn Row::blob_by(Self, String) -> Bytes raise DbError
 pub fn Row::bool(Self, Int32) -> Bool raise DbError
@@ -111,12 +113,20 @@ pub fn Row::int64_by(Self, String) -> Int64 raise DbError
 pub fn Row::int_by(Self, String) -> Int32 raise DbError
 pub fn Row::is_null(Self, Int32) -> Bool raise DbError
 pub fn Row::is_null_by(Self, String) -> Bool raise DbError
+pub fn Row::json(Self, Int32) -> String raise DbError
+pub fn Row::json_by(Self, String) -> String raise DbError
 pub fn Row::not_equal(Self, Self) -> Bool
+pub fn Row::numeric(Self, Int32) -> String raise DbError
+pub fn Row::numeric_by(Self, String) -> String raise DbError
 pub fn[T : FromValue] Row::read(Self, Int32) -> T raise DbError
 pub fn[T : FromValue] Row::read_by(Self, String) -> T raise DbError
 pub fn Row::text(Self, Int32) -> String raise DbError
 pub fn Row::text_by(Self, String) -> String raise DbError
+pub fn Row::time(Self, Int32) -> String raise DbError
+pub fn Row::time_by(Self, String) -> String raise DbError
 pub fn Row::to_repr(Self) -> @debug.Repr
+pub fn Row::uuid(Self, Int32) -> Bytes raise DbError
+pub fn Row::uuid_by(Self, String) -> Bytes raise DbError
 pub fn Row::width(Self) -> Int32
 
 pub(all) struct ServerDetail {
@@ -138,10 +148,16 @@ pub(all) enum Value {
   Double(Double)
   Text(String)
   Blob(Bytes)
+  Time(String)
+  Numeric(String)
+  Uuid(Bytes)
+  Json(String)
+  Array(Array[Value])
 }
 pub fn Value::equal(Self, Self) -> Bool
 pub fn Value::from_value(Self) -> Self raise DbError
 pub fn Value::is_null(Self) -> Bool
+pub fn Value::json_text(Self) -> String
 pub fn Value::kind(Self) -> String
 pub fn Value::not_equal(Self, Self) -> Bool
 pub fn Value::output(Self, &Logger) -> Unit
@@ -197,6 +213,7 @@ pub impl FromValue for Double
 pub impl FromValue for String
 pub impl[T : FromValue] FromValue for T?
 pub impl FromValue for Bytes
+pub impl FromValue for Array[Value]
 
 pub(open) trait ToValue {
   fn to_value(Self) -> Value
@@ -208,3 +225,4 @@ pub impl ToValue for Double
 pub impl ToValue for String
 pub impl[T : ToValue] ToValue for T?
 pub impl ToValue for Bytes
+pub impl ToValue for Array[Value]

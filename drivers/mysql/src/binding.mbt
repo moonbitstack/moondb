@@ -13,21 +13,32 @@ fn render_value(v : @moondb.Value, mode : QuoteMode) -> Bytes {
     Int(i) => string_to_bytes(i.to_string())
     Int64(i) => string_to_bytes(i.to_string())
     Double(d) => string_to_bytes(d.to_string())
-    Text(s) => {
-      let buf = Buffer()
-      buf.write_byte(b'\'')
-      escape_into(buf, string_to_bytes(s), mode)
-      buf.write_byte(b'\'')
-      buf.to_bytes()
-    }
-    Blob(bytes) => {
-      let buf = Buffer()
-      buf.write_bytes(b"x'")
-      buf.write_bytes(@base16.encode_bytes(bytes))
-      buf.write_byte(b'\'')
-      buf.to_bytes()
-    }
+    Numeric(s) => string_to_bytes(s)
+    Text(s) => quoted_text(s, mode)
+    Time(s) => quoted_text(s, mode)
+    Json(s) => quoted_text(s, mode)
+    Uuid(bytes) => binary_literal(bytes)
+    Blob(bytes) => binary_literal(bytes)
+    Array(_) => quoted_text(v.json_text(), mode)
   }
+}
+
+///|
+fn quoted_text(s : String, mode : QuoteMode) -> Bytes {
+  let buf = Buffer()
+  buf.write_byte(b'\'')
+  escape_into(buf, string_to_bytes(s), mode)
+  buf.write_byte(b'\'')
+  buf.to_bytes()
+}
+
+///|
+fn binary_literal(bytes : Bytes) -> Bytes {
+  let buf = Buffer()
+  buf.write_bytes(b"x'")
+  buf.write_bytes(@base16.encode_bytes(bytes))
+  buf.write_byte(b'\'')
+  buf.to_bytes()
 }
 
 ///|

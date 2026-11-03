@@ -144,6 +144,70 @@ pub fn Row::blob(self : Row, idx : Int32) -> Bytes raise DbError {
   self.read(idx)
 }
 
+///|
+/// Read column `idx` as a temporal value's ISO-8601 text. Raises `TypeError`
+/// unless the cell is `Time`.
+pub fn Row::time(self : Row, idx : Int32) -> String raise DbError {
+  match self.get(idx) {
+    Time(s) => s
+    other =>
+      raise TypeError(
+        "column " + idx.to_string() + " is " + other.kind() + ", not Time",
+      )
+  }
+}
+
+///|
+/// Read column `idx` as an exact decimal string. Raises `TypeError` unless the
+/// cell is `Numeric`.
+pub fn Row::numeric(self : Row, idx : Int32) -> String raise DbError {
+  match self.get(idx) {
+    Numeric(s) => s
+    other =>
+      raise TypeError(
+        "column " + idx.to_string() + " is " + other.kind() + ", not Numeric",
+      )
+  }
+}
+
+///|
+/// Read column `idx` as the raw bytes of a UUID. Raises `TypeError` unless the
+/// cell is `Uuid`.
+pub fn Row::uuid(self : Row, idx : Int32) -> Bytes raise DbError {
+  match self.get(idx) {
+    Uuid(b) => b
+    other =>
+      raise TypeError(
+        "column " + idx.to_string() + " is " + other.kind() + ", not Uuid",
+      )
+  }
+}
+
+///|
+/// Read column `idx` as JSON text. Raises `TypeError` unless the cell is `Json`.
+pub fn Row::json(self : Row, idx : Int32) -> String raise DbError {
+  match self.get(idx) {
+    Json(s) => s
+    other =>
+      raise TypeError(
+        "column " + idx.to_string() + " is " + other.kind() + ", not Json",
+      )
+  }
+}
+
+///|
+/// Read column `idx` as an SQL array. Raises `TypeError` unless the cell is
+/// `Array`.
+pub fn Row::array(self : Row, idx : Int32) -> Array[Value] raise DbError {
+  match self.get(idx) {
+    Array(items) => items
+    other =>
+      raise TypeError(
+        "column " + idx.to_string() + " is " + other.kind() + ", not Array",
+      )
+  }
+}
+
 // --- by-name typed accessors ---------------------------------------------------
 //
 // Convenience wrappers that resolve a column name through `index_of` (raising
@@ -192,6 +256,36 @@ pub fn Row::text_by(self : Row, name : String) -> String raise DbError {
 /// Read the column named `name` as an opaque blob.
 pub fn Row::blob_by(self : Row, name : String) -> Bytes raise DbError {
   self.blob(self.index_of(name))
+}
+
+///|
+/// Read the column named `name` as temporal ISO-8601 text.
+pub fn Row::time_by(self : Row, name : String) -> String raise DbError {
+  self.time(self.index_of(name))
+}
+
+///|
+/// Read the column named `name` as an exact decimal string.
+pub fn Row::numeric_by(self : Row, name : String) -> String raise DbError {
+  self.numeric(self.index_of(name))
+}
+
+///|
+/// Read the column named `name` as UUID bytes.
+pub fn Row::uuid_by(self : Row, name : String) -> Bytes raise DbError {
+  self.uuid(self.index_of(name))
+}
+
+///|
+/// Read the column named `name` as JSON text.
+pub fn Row::json_by(self : Row, name : String) -> String raise DbError {
+  self.json(self.index_of(name))
+}
+
+///|
+/// Read the column named `name` as an SQL array.
+pub fn Row::array_by(self : Row, name : String) -> Array[Value] raise DbError {
+  self.array(self.index_of(name))
 }
 
 ///|

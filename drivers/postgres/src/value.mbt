@@ -34,6 +34,42 @@ pub const OID_FLOAT4 : Int32 = 700
 pub const OID_FLOAT8 : Int32 = 701
 
 ///|
+/// The `pg_type` OID of `json`.
+pub const OID_JSON : Int32 = 114
+
+///|
+/// The `pg_type` OID of `jsonb`.
+pub const OID_JSONB : Int32 = 3802
+
+///|
+/// The `pg_type` OID of `date`.
+pub const OID_DATE : Int32 = 1082
+
+///|
+/// The `pg_type` OID of `time`.
+pub const OID_TIME : Int32 = 1083
+
+///|
+/// The `pg_type` OID of `timetz`.
+pub const OID_TIMETZ : Int32 = 1266
+
+///|
+/// The `pg_type` OID of `timestamp`.
+pub const OID_TIMESTAMP : Int32 = 1114
+
+///|
+/// The `pg_type` OID of `timestamptz`.
+pub const OID_TIMESTAMPTZ : Int32 = 1184
+
+///|
+/// The `pg_type` OID of `numeric`.
+pub const OID_NUMERIC : Int32 = 1700
+
+///|
+/// The `pg_type` OID of `uuid`.
+pub const OID_UUID : Int32 = 2950
+
+///|
 /// Encode a bound parameter to its text-format bytes, or `None` for SQL `NULL`
 /// (which the Bind message sends as a length of `-1`). Binding is out-of-band —
 /// the value never touches the SQL string — so this is the injection-safe path.
@@ -53,6 +89,11 @@ pub fn encode_param(v : Value) -> Bytes? {
     @moondb.Text(s) => Some(@utf8.encode(s))
     @moondb.Blob(b) =>
       Some(@utf8.encode("\\x" + @base16.encode(b[:]).to_lower()))
+    @moondb.Time(s) => Some(@utf8.encode(s))
+    @moondb.Numeric(s) => Some(@utf8.encode(s))
+    @moondb.Uuid(b) => Some(@utf8.encode(uuid_text(b)))
+    @moondb.Json(s) => Some(@utf8.encode(s))
+    @moondb.Array(items) => Some(@utf8.encode(array_literal(items)))
   }
 }
 
@@ -86,9 +127,274 @@ pub fn decode_value(oid : Int32, is_null : Bool, raw : String) -> Value {
     }
   } else if oid == OID_BYTEA {
     @moondb.Blob(decode_bytea(raw))
+  } else if oid == OID_NUMERIC {
+    @moondb.Numeric(raw)
+  } else if oid == OID_UUID {
+    @moondb.Uuid(decode_uuid(raw))
+  } else if oid == OID_JSON || oid == OID_JSONB {
+    @moondb.Json(raw)
+  } else if oid == OID_DATE ||
+    oid == OID_TIME ||
+    oid == OID_TIMETZ ||
+    oid == OID_TIMESTAMP ||
+    oid == OID_TIMESTAMPTZ {
+    @moondb.Time(normalize_timestamp(raw))
   } else {
-    @moondb.Text(raw)
+    match array_element_oid(oid) {
+      Some(elem) => @moondb.Array(parse_array_text(raw, elem))
+      None => @moondb.Text(raw)
+    }
   }
+}
+
+///|
+/// Format a 16-byte UUID as the canonical `8-4-4-4-12` hex text PostgreSQL
+/// accepts for a `uuid` parameter or array element.
+fn uuid_text(b : Bytes) -> String {
+  let hex = @base16.encode(b[:]).to_lower()
+  let sb = StringBuilder()
+  for i in 0..<hex.length() {
+    if i == 8 || i == 12 || i == 16 || i == 20 {
+      sb.write_char('-')
+    }
+    sb.write_char(hex[i].unsafe_to_char())
+  }
+  sb.to_string()
+}
+
+///|
+/// Strip the dashes from a UUID's text form and decode its 16 bytes.
+fn decode_uuid(raw : String) -> Bytes {
+  let sb = StringBuilder()
+  for i in 0..<raw.length() {
+    if raw[i].to_int() != 45 {
+      sb.write_char(raw[i].unsafe_to_char())
+    }
+  }
+  let clean = sb.to_string()
+  @base16.decode_lossy(clean[:])
+}
+
+///|
+/// PostgreSQL renders a timestamp with a space between date and time; the ISO-8601
+/// text `Value::Time` carries uses `T`.
+fn normalize_timestamp(raw : String) -> String {
+  let sb = StringBuilder()
+  let mut done = false
+  for i in 0..<raw.length() {
+    let c = raw[i]
+    if !done && c.to_int() == 32 {
+      sb.write_char('T')
+      done = true
+    } else {
+      sb.write_char(c.unsafe_to_char())
+    }
+  }
+  sb.to_string()
+}
+
+///|
+/// The element OID of a PostgreSQL array type, or `None` for a non-array OID.
+fn array_element_oid(oid : Int32) -> Int32? {
+  if oid == 1000 {
+    Some(OID_BOOL)
+  } else if oid == 1005 {
+    Some(OID_INT2)
+  } else if oid == 1007 {
+    Some(OID_INT4)
+  } else if oid == 1016 {
+    Some(OID_INT8)
+  } else if oid == 1021 {
+    Some(OID_FLOAT4)
+  } else if oid == 1022 {
+    Some(OID_FLOAT8)
+  } else if oid == 1009 {
+    Some(25)
+  } else if oid == 1015 {
+    Some(1043)
+  } else if oid == 1231 {
+    Some(OID_NUMERIC)
+  } else if oid == 2951 {
+    Some(OID_UUID)
+  } else if oid == 3807 {
+    Some(OID_JSONB)
+  } else if oid == 1115 {
+    Some(OID_TIMESTAMP)
+  } else if oid == 1185 {
+    Some(OID_TIMESTAMPTZ)
+  } else if oid == 1182 {
+    Some(OID_DATE)
+  } else {
+    None
+  }
+}
+
+///|
+/// A PostgreSQL array literal (`{...}`) for an `Array` value bound as a parameter.
+fn array_literal(items : Array[Value]) -> String {
+  let sb = StringBuilder()
+  sb.write_char('{')
+  for i in 0..<items.length() {
+    if i > 0 {
+      sb.write_char(',')
+    }
+    match items[i] {
+      @moondb.Null => sb.write_string("NULL")
+      @moondb.Array(inner) => sb.write_string(array_literal(inner))
+      @moondb.Text(s) => write_array_element(sb, s)
+      @moondb.Time(s) => write_array_element(sb, s)
+      @moondb.Numeric(s) => sb.write_string(s)
+      @moondb.Json(s) => write_array_element(sb, s)
+      @moondb.Uuid(b) => write_array_element(sb, uuid_text(b))
+      @moondb.Bool(v) => sb.write_string(if v { "t" } else { "f" })
+      @moondb.Int(n) => sb.write_string(n.to_string())
+      @moondb.Int64(n) => sb.write_string(n.to_string())
+      @moondb.Double(d) => sb.write_string(d.to_string())
+      @moondb.Blob(b) =>
+        write_array_element(sb, "\\x" + @base16.encode(b[:]).to_lower())
+    }
+  }
+  sb.write_char('}')
+  sb.to_string()
+}
+
+///|
+fn write_array_element(sb : StringBuilder, s : String) -> Unit {
+  sb.write_char('"')
+  for i in 0..<s.length() {
+    let c = s[i]
+    if c.to_int() == 92 || c.to_int() == 34 {
+      sb.write_char('\\')
+    }
+    sb.write_char(c.unsafe_to_char())
+  }
+  sb.write_char('"')
+}
+
+///|
+/// Parse PostgreSQL's array text (`{a,b,"c,d",NULL}`) into elementwise values,
+/// decoding each through `decode_value` with the element type.
+fn parse_array_text(raw : String, elem_oid : Int32) -> Array[Value] {
+  let items : Array[Value] = []
+  let n = raw.length()
+  let mut i = 0
+  if i < n && raw[i].to_int() == 123 {
+    i += 1
+  }
+  while i < n {
+    while i < n && is_ws_char(raw[i]) {
+      i += 1
+    }
+    if i >= n {
+      break
+    }
+    let c = raw[i].to_int()
+    if c == 125 {
+      break
+    }
+    if c == 44 {
+      i += 1
+      continue
+    }
+    if c == 123 {
+      let (sub, next) = scan_nested_array(raw, i)
+      items.push(@moondb.Array(parse_array_text(sub, elem_oid)))
+      i = next
+    } else if c == 34 {
+      let (s, next) = scan_quoted_array_element(raw, i)
+      items.push(decode_value(elem_oid, false, s))
+      i = next
+    } else {
+      let (token, next) = scan_unquoted_array_element(raw, i)
+      if token == "NULL" {
+        items.push(@moondb.Null)
+      } else {
+        items.push(decode_value(elem_oid, false, token))
+      }
+      i = next
+    }
+  }
+  items
+}
+
+///|
+fn is_ws_char(c : UInt16) -> Bool {
+  let ci = c.to_int()
+  ci == 32 || ci == 9 || ci == 10 || ci == 13
+}
+
+///|
+fn scan_quoted_array_element(raw : String, start : Int32) -> (String, Int32) {
+  let sb = StringBuilder()
+  let n = raw.length()
+  let mut i = start + 1
+  while i < n {
+    let c = raw[i]
+    if c.to_int() == 92 && i + 1 < n {
+      i += 1
+      sb.write_char(raw[i].unsafe_to_char())
+      i += 1
+    } else if c.to_int() == 34 {
+      i += 1
+      break
+    } else {
+      sb.write_char(c.unsafe_to_char())
+      i += 1
+    }
+  }
+  (sb.to_string(), i)
+}
+
+///|
+fn scan_unquoted_array_element(raw : String, start : Int32) -> (String, Int32) {
+  let sb = StringBuilder()
+  let n = raw.length()
+  let mut i = start
+  while i < n {
+    let c = raw[i].to_int()
+    if c == 44 || c == 125 {
+      break
+    }
+    sb.write_char(raw[i].unsafe_to_char())
+    i += 1
+  }
+  (sb.to_string().trim().to_owned(), i)
+}
+
+///|
+fn scan_nested_array(raw : String, start : Int32) -> (String, Int32) {
+  let n = raw.length()
+  let mut depth = 0
+  let mut i = start
+  let mut in_quote = false
+  while i < n {
+    let c = raw[i].to_int()
+    if in_quote {
+      if c == 92 && i + 1 < n {
+        i += 2
+        continue
+      }
+      if c == 34 {
+        in_quote = false
+      }
+      i += 1
+    } else if c == 34 {
+      in_quote = true
+      i += 1
+    } else if c == 123 {
+      depth += 1
+      i += 1
+    } else if c == 125 {
+      depth -= 1
+      i += 1
+      if depth == 0 {
+        return (raw[start:i].to_owned(), i)
+      }
+    } else {
+      i += 1
+    }
+  }
+  (raw[start:n].to_owned(), n)
 }
 
 ///|

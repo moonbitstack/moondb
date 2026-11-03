@@ -123,6 +123,19 @@ pub impl FromValue for Bytes with fn from_value(v) {
 }
 
 ///|
+pub impl ToValue for Array[Value] with fn to_value(self) {
+  Array(self)
+}
+
+///|
+pub impl FromValue for Array[Value] with fn from_value(v) {
+  match v {
+    Array(items) => items
+    other => raise refuse(other, "Array")
+  }
+}
+
+///|
 pub impl[T : ToValue] ToValue for T? with fn to_value(self) {
   match self {
     Some(x) => x.to_value()

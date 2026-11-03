@@ -33,6 +33,73 @@ test "bind_params renders every Value variant as a MySQL literal" {
 }
 
 ///|
+test "bind_params renders temporal, numeric, uuid, json and array values" {
+  assert_eq(
+    q("v ?", [@moondb.Time("2026-11-03T19:40:35")]),
+    "v '2026-11-03T19:40:35'",
+  )
+  assert_eq(q("v ?", [@moondb.Numeric("1.50")]), "v 1.50")
+  assert_eq(
+    q("v ?", [
+      @moondb.Uuid(
+        b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+      ),
+    ]),
+    "v x'00112233445566778899aabbccddeeff'",
+  )
+  assert_eq(q("v ?", [@moondb.Json("{\"k\":1}")]), "v '{\\\"k\\\":1}'")
+  assert_eq(
+    q("v ?", [@moondb.Array([@moondb.Int(1), @moondb.Text("x")])]),
+    "v '[1,\\\"x\\\"]'",
+  )
+}
+
+///|
+test "decode_text_value maps numeric, temporal, json and unsigned columns" {
+  assert_eq(
+    @moonmysql.decode_text_value(Some(b"3.14"), {
+      name: "d",
+      column_type: 246,
+      charset: 33,
+      flags: 0,
+    }) ==
+    @moondb.Numeric("3.14"),
+    true,
+  )
+  assert_eq(
+    @moonmysql.decode_text_value(Some(b"2026-11-03 19:40:35"), {
+      name: "dt",
+      column_type: 12,
+      charset: 33,
+      flags: 0,
+    }) ==
+    @moondb.Time("2026-11-03T19:40:35"),
+    true,
+  )
+  assert_eq(
+    @moonmysql.decode_text_value(Some(b"{\"k\":1}"), {
+      name: "j",
+      column_type: 245,
+      charset: 33,
+      flags: 0,
+    }) ==
+    @moondb.Json("{\"k\":1}"),
+    true,
+  )
+  // A LONG with UNSIGNED_FLAG above Int32 max widens to Int64, not a wrapped Int.
+  assert_eq(
+    @moonmysql.decode_text_value(Some(b"4294967295"), {
+      name: "u",
+      column_type: 3,
+      charset: 63,
+      flags: 32,
+    }) ==
+    @moondb.Int64(4294967295L),
+    true,
+  )
+}
+
+///|
 test "bind_params escapes every string metacharacter" {
   // NUL, newline, carriage return, backslash, single quote, double quote, Ctrl-Z.
   assert_eq(q("?", [@moondb.Text("a\u{00}b")]), "'a\\0b'")

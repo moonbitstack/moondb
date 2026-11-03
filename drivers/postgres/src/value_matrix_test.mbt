@@ -76,11 +76,38 @@ test "decode_value maps every typed OID, and NULL overrides the type" {
     @moondb.Bool(false),
     true,
   )
-  // an unknown OID (e.g. numeric/timestamp) rides back as Text, dialect-neutral
+  // numeric -> Numeric, uuid -> Uuid, json -> Json, temporal -> Time
   assert_eq(
-    @moonpostgres.decode_value(1700, false, "3.14") == @moondb.Text("3.14"),
+    @moonpostgres.decode_value(@moonpostgres.OID_NUMERIC, false, "3.14") ==
+    @moondb.Numeric("3.14"),
     true,
   )
+  assert_eq(
+    @moonpostgres.decode_value(
+      @moonpostgres.OID_UUID,
+      false,
+      "00112233-4455-6677-8899-aabbccddeeff",
+    ) ==
+    @moondb.Uuid(
+      b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+    ),
+    true,
+  )
+  assert_eq(
+    @moonpostgres.decode_value(@moonpostgres.OID_JSON, false, "{\"k\":1}") ==
+    @moondb.Json("{\"k\":1}"),
+    true,
+  )
+  assert_eq(
+    @moonpostgres.decode_value(
+      @moonpostgres.OID_TIMESTAMP,
+      false,
+      "2026-11-03 19:40:35",
+    ) ==
+    @moondb.Time("2026-11-03T19:40:35"),
+    true,
+  )
+  // a plain text OID still rides back as Text
   assert_eq(@moonpostgres.decode_value(25, false, "") == @moondb.Text(""), true)
   // a wire NULL decodes to Null whatever the column type says
   assert_eq(
@@ -134,4 +161,37 @@ test "bytea survives a full encode -> decode round trip" {
     @moondb.Blob(original),
     true,
   )
+}
+
+///|
+test "decode_value parses a PostgreSQL array into Array" {
+  assert_eq(
+    @moonpostgres.decode_value(1007, false, "{1,2,3}") ==
+    @moondb.Array([@moondb.Int(1), @moondb.Int(2), @moondb.Int(3)]),
+    true,
+  )
+  // a NULL element, a quoted element containing a comma, an escaped quote
+  assert_eq(
+    @moonpostgres.decode_value(1009, false, "{\"a,b\",NULL,\"c\\\"d\"}") ==
+    @moondb.Array([@moondb.Text("a,b"), @moondb.Null, @moondb.Text("c\"d")]),
+    true,
+  )
+  // multi-dimensional
+  assert_eq(
+    @moonpostgres.decode_value(1007, false, "{{1,2},{3,4}}") ==
+    @moondb.Array([
+      @moondb.Array([@moondb.Int(1), @moondb.Int(2)]),
+      @moondb.Array([@moondb.Int(3), @moondb.Int(4)]),
+    ]),
+    true,
+  )
+}
+
+///|
+test "an Array binds back as a PostgreSQL array literal" {
+  let items = [@moondb.Int(1), @moondb.Text("a,b"), @moondb.Null]
+  match @moonpostgres.encode_param(@moondb.Array(items)) {
+    Some(bytes) => assert_eq(bytes == @utf8.encode("{1,\"a,b\",NULL}"), true)
+    None => abort("an Array is not NULL")
+  }
 }

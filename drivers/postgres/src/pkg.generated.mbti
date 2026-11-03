@@ -11,6 +11,8 @@ pub const OID_BOOL : Int32 = 16
 
 pub const OID_BYTEA : Int32 = 17
 
+pub const OID_DATE : Int32 = 1082
+
 pub const OID_FLOAT4 : Int32 = 700
 
 pub const OID_FLOAT8 : Int32 = 701
@@ -20,6 +22,22 @@ pub const OID_INT2 : Int32 = 21
 pub const OID_INT4 : Int32 = 23
 
 pub const OID_INT8 : Int32 = 20
+
+pub const OID_JSON : Int32 = 114
+
+pub const OID_JSONB : Int32 = 3802
+
+pub const OID_NUMERIC : Int32 = 1700
+
+pub const OID_TIME : Int32 = 1083
+
+pub const OID_TIMESTAMP : Int32 = 1114
+
+pub const OID_TIMESTAMPTZ : Int32 = 1184
+
+pub const OID_TIMETZ : Int32 = 1266
+
+pub const OID_UUID : Int32 = 2950
 
 pub fn build_bind(Array[@moondb.Value]) -> Bytes
 

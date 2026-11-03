@@ -29,6 +29,31 @@ const MYSQL_TYPE_INT24 : Int32 = 9
 const MYSQL_TYPE_YEAR : Int32 = 13
 
 ///|
+const MYSQL_TYPE_DATE : Int32 = 10
+
+///|
+const MYSQL_TYPE_TIME : Int32 = 11
+
+///|
+const MYSQL_TYPE_DATETIME : Int32 = 12
+
+///|
+const MYSQL_TYPE_TIMESTAMP : Int32 = 7
+
+///|
+const MYSQL_TYPE_DECIMAL : Int32 = 0
+
+///|
+const MYSQL_TYPE_NEWDECIMAL : Int32 = 246
+
+///|
+const MYSQL_TYPE_JSON : Int32 = 245
+
+///|
+/// The `UNSIGNED_FLAG` bit of a column definition's flags word.
+const UNSIGNED_FLAG : Int32 = 0x0020
+
+///|
 /// The `binary` collation id: a column carrying it is raw bytes, not text.
 const COLLATION_BINARY : Int32 = 63
 
@@ -183,16 +208,34 @@ pub fn decode_text_value(
     None => @moondb.Null
     Some(bytes) => {
       let t = col.column_type
+      let unsigned = is_unsigned(col)
       if t == MYSQL_TYPE_TINY ||
         t == MYSQL_TYPE_SHORT ||
         t == MYSQL_TYPE_LONG ||
         t == MYSQL_TYPE_INT24 ||
         t == MYSQL_TYPE_YEAR {
-        @moondb.Int(parse_int_cell(bytes))
+        if unsigned {
+          unsigned_integer(bytes)
+        } else {
+          @moondb.Int(parse_int_cell(bytes))
+        }
       } else if t == MYSQL_TYPE_LONGLONG {
-        @moondb.Int64(parse_int64_cell(bytes))
+        if unsigned {
+          unsigned_bigint(bytes)
+        } else {
+          @moondb.Int64(parse_int64_cell(bytes))
+        }
       } else if t == MYSQL_TYPE_FLOAT || t == MYSQL_TYPE_DOUBLE {
         @moondb.Double(parse_double_cell(bytes))
+      } else if t == MYSQL_TYPE_DECIMAL || t == MYSQL_TYPE_NEWDECIMAL {
+        @moondb.Numeric(bytes_to_string(bytes))
+      } else if t == MYSQL_TYPE_DATE ||
+        t == MYSQL_TYPE_TIME ||
+        t == MYSQL_TYPE_DATETIME ||
+        t == MYSQL_TYPE_TIMESTAMP {
+        @moondb.Time(normalize_mysql_temporal(bytes_to_string(bytes)))
+      } else if t == MYSQL_TYPE_JSON {
+        @moondb.Json(bytes_to_string(bytes))
       } else if col.charset == COLLATION_BINARY {
         @moondb.Blob(bytes)
       } else {
@@ -200,6 +243,51 @@ pub fn decode_text_value(
       }
     }
   }
+}
+
+///|
+/// Whether a column definition carries the `UNSIGNED_FLAG`.
+fn is_unsigned(col : ColumnDef) -> Bool {
+  (col.flags & UNSIGNED_FLAG) != 0
+}
+
+///|
+/// Decode an unsigned integer cell: `Int` when it fits 32 bits, `Int64` when it
+/// fits 64, and the exact digit text when it exceeds even `Int64` (a
+/// `BIGINT UNSIGNED` above 2^63-1 has no signed 64-bit fit).
+fn unsigned_integer(raw : Bytes) -> @moondb.Value {
+  let s = bytes_to_string(raw)
+  let n = @string.parse_int64(s[:]) catch { _ => return @moondb.Text(s) }
+  if n >= -2147483648L && n <= 2147483647L {
+    @moondb.Int(n.to_int())
+  } else {
+    @moondb.Int64(n)
+  }
+}
+
+///|
+fn unsigned_bigint(raw : Bytes) -> @moondb.Value {
+  let s = bytes_to_string(raw)
+  let n = @string.parse_int64(s[:]) catch { _ => return @moondb.Text(s) }
+  @moondb.Int64(n)
+}
+
+///|
+/// MySQL renders `DATETIME`/`TIMESTAMP` with a space between date and time; the
+/// ISO-8601 text `Value::Time` carries uses `T`.
+fn normalize_mysql_temporal(raw : String) -> String {
+  let sb = StringBuilder()
+  let mut done = false
+  for i in 0..<raw.length() {
+    let c = raw[i]
+    if !done && c.to_int() == 32 {
+      sb.write_char('T')
+      done = true
+    } else {
+      sb.write_char(c.unsafe_to_char())
+    }
+  }
+  sb.to_string()
 }
 
 ///|

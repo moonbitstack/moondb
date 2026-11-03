@@ -78,6 +78,12 @@ fn bind_params(st : Int64, params : Array[@moondb.Value]) -> Unit {
       @moondb.Double(v) => ffi_bind_double(st, idx, v) |> ignore
       @moondb.Text(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
       @moondb.Blob(v) => ffi_bind_blob(st, idx, v) |> ignore
+      @moondb.Time(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
+      @moondb.Numeric(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
+      @moondb.Uuid(v) => ffi_bind_blob(st, idx, v) |> ignore
+      @moondb.Json(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
+      @moondb.Array(_) =>
+        ffi_bind_text(st, idx, @utf8.encode(params[i].json_text())) |> ignore
     }
   }
 }
