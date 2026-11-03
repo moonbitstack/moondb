@@ -177,6 +177,15 @@ test "db error: Show renders every case identically to to_string" {
     QueryError("bad sql"),
     TypeError("not Int"),
     Closed,
+    @moondb.Server(@moondb.ServerDetail::{
+      kind: @moondb.Programming,
+      sqlstate: Some("42P01"),
+      code: None,
+      message: "relation \"hero\" does not exist",
+      detail: None,
+      hint: None,
+      severity: Some("ERROR"),
+    }),
   ]
   for e in cases {
     assert_eq("\{e}", e.to_string())

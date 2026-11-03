@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn classify_sqlstate(String) -> ErrorKind
+
 pub fn drain(&Cursor) -> Array[Row] raise DbError
 
 pub async fn drain_async(&AsyncCursor) -> Array[Row] raise DbError
@@ -16,8 +18,12 @@ pub(all) suberror DbError {
   QueryError(String)
   TypeError(String)
   Closed
+  Server(ServerDetail)
 }
+pub fn DbError::code(Self) -> Int32?
+pub fn DbError::kind(Self) -> ErrorKind
 pub fn DbError::output(Self, &Logger) -> Unit
+pub fn DbError::sqlstate(Self) -> String?
 pub fn DbError::to_string(Self) -> String
 pub impl Show for DbError
 
@@ -40,10 +46,27 @@ pub fn AsyncArrayCursor::new(Array[Row]) -> Self
 pub async fn AsyncArrayCursor::next(Self) -> Row? raise DbError
 pub impl AsyncCursor for AsyncArrayCursor
 
+#derive(Eq, @debug.Debug)
+pub(all) enum ErrorKind {
+  Interface
+  Database
+  Data
+  Operational
+  Integrity
+  Programming
+  Internal
+  NotSupported
+}
+pub fn ErrorKind::equal(Self, Self) -> Bool
+pub fn ErrorKind::not_equal(Self, Self) -> Bool
+pub fn ErrorKind::to_repr(Self) -> @debug.Repr
+pub fn ErrorKind::to_string(Self) -> String
+
+#derive(Eq)
 pub(all) struct ExecResult {
   rows_affected : Int64
   last_insert_id : Int64
-} derive(Eq)
+}
 pub fn ExecResult::equal(Self, Self) -> Bool
 pub fn ExecResult::not_equal(Self, Self) -> Bool
 
@@ -67,10 +90,11 @@ pub fn MockDriver::rollback(Self) -> Unit raise DbError
 pub fn MockDriver::row_count(Self) -> Int32
 pub impl Driver for MockDriver
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Row {
   columns : Array[String]
   values : Array[Value]
-} derive(Eq, @debug.Debug)
+}
 pub fn Row::blob(Self, Int32) -> Bytes raise DbError
 pub fn Row::blob_by(Self, String) -> Bytes raise DbError
 pub fn Row::bool(Self, Int32) -> Bool raise DbError
@@ -95,6 +119,17 @@ pub fn Row::text_by(Self, String) -> String raise DbError
 pub fn Row::to_repr(Self) -> @debug.Repr
 pub fn Row::width(Self) -> Int32
 
+pub(all) struct ServerDetail {
+  kind : ErrorKind
+  sqlstate : String?
+  code : Int32?
+  message : String
+  detail : String?
+  hint : String?
+  severity : String?
+}
+
+#derive(Eq, @debug.Debug)
 pub(all) enum Value {
   Null
   Bool(Bool)
@@ -103,7 +138,7 @@ pub(all) enum Value {
   Double(Double)
   Text(String)
   Blob(Bytes)
-} derive(Eq, @debug.Debug)
+}
 pub fn Value::equal(Self, Self) -> Bool
 pub fn Value::from_value(Self) -> Self raise DbError
 pub fn Value::is_null(Self) -> Bool

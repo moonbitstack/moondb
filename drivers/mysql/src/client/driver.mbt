@@ -53,10 +53,43 @@ fn to_db_error(e : Error) -> @moondb.DbError {
     @moondb.ConnectError(m) => @moondb.ConnectError(m)
     @moondb.QueryError(m) => @moondb.QueryError(m)
     @moondb.TypeError(m) => @moondb.TypeError(m)
-    @moonmysql.ServerError(_, _, _)
-    | @moonmysql.ProtocolError(_)
-    | @moonmysql.UnsupportedError(_) => @moondb.QueryError(e.to_string())
+    @moondb.Server(d) => @moondb.Server(d)
+    @moonmysql.ServerError(code, state, msg) =>
+      @moondb.Server(@moondb.ServerDetail::{
+        kind: classify_mysql(code, state),
+        sqlstate: if state == "" {
+          None
+        } else {
+          Some(state)
+        },
+        code: Some(code),
+        message: msg,
+        detail: None,
+        hint: None,
+        severity: None,
+      })
+    @moonmysql.ProtocolError(_) | @moonmysql.UnsupportedError(_) =>
+      @moondb.QueryError(e.to_string())
     _ => @moondb.ConnectError(e.to_string())
+  }
+}
+
+///|
+/// Classify a MySQL ERR packet. A specific SQLSTATE names the class directly;
+/// MySQL's generic `HY000` (and an empty state, as older servers send) carry no
+/// refinement, so the errno decides there.
+fn classify_mysql(code : Int32, state : String) -> @moondb.ErrorKind {
+  if state != "" && state != "HY000" {
+    return @moondb.classify_sqlstate(state)
+  }
+  match code {
+    1022 | 1048 | 1062 | 1169 | 1216 | 1217 | 1451 | 1452 => @moondb.Integrity
+    1040 | 1041 | 1045 | 1203 | 1205 | 1213 | 1698 | 2006 | 2013 =>
+      @moondb.Operational
+    1044 | 1049 | 1054 | 1064 | 1146 | 1149 => @moondb.Programming
+    1264 | 1265 | 1366 | 1406 => @moondb.Data
+    1235 | 1295 => @moondb.NotSupported
+    _ => @moondb.Database
   }
 }
 

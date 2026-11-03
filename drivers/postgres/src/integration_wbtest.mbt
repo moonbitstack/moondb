@@ -217,22 +217,22 @@ async test "integration: SAVEPOINT rolls back inner work while the outer tx comm
 async test "integration: the server error surface — syntax, missing table, unique" {
   guard @env.get_env_var("MOON_PG_TEST") is Some(_) else { return }
   let conn = pg_open()
-  // A syntax error surfaces as a QueryError, not a silent success.
+  // A syntax error surfaces as a structured Server error, not a silent success.
   let syntax = try {
     conn.query("SELCT 1", []) |> ignore
     false
   } catch {
-    @moondb.QueryError(_) => true
+    @moondb.Server(_) => true
     _ => false
   }
   assert_eq(syntax, true)
-  // A missing table errors as QueryError. read_results already drains to
+  // A missing table errors as a Server error. read_results already drains to
   // ReadyForQuery on error, so the connection stays usable for the next statement.
   let missing = try {
     conn.query("SELECT * FROM moon_pg_absent", []) |> ignore
     false
   } catch {
-    @moondb.QueryError(_) => true
+    @moondb.Server(_) => true
     _ => false
   }
   assert_eq(missing, true)
@@ -246,7 +246,7 @@ async test "integration: the server error surface — syntax, missing table, uni
     |> ignore
     false
   } catch {
-    @moondb.QueryError(_) => true
+    @moondb.Server(_) => true
     _ => false
   }
   assert_eq(dup, true)

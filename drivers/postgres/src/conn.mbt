@@ -118,7 +118,8 @@ async fn PgConn::run_startup(
         }
       }
       // 'E' ErrorResponse
-      69 => raise @moondb.ConnectError(parse_error_response(payload))
+      69 =>
+        raise @moondb.ConnectError(server_message(parse_error_detail(payload)))
       // 'Z' ReadyForQuery
       90 => return
       // 'S' ParameterStatus / 'K' BackendKeyData / 'N' NoticeResponse — ignore
@@ -183,7 +184,7 @@ async fn PgConn::read_sasl_message(
 ) -> String raise DbError {
   let (tag, payload) = self.read_message()
   if tag == 69 {
-    raise @moondb.ConnectError(parse_error_response(payload))
+    raise @moondb.ConnectError(server_message(parse_error_detail(payload)))
   }
   guard tag == 82 else {
     raise @moondb.ConnectError("protocol: expected Authentication during SASL")
@@ -235,10 +236,11 @@ async fn PgConn::read_results(self : PgConn) -> QueryOutcome raise DbError {
       }
       // 'E' ErrorResponse
       69 => {
-        // still drain to ReadyForQuery so the connection stays usable
-        let msg = parse_error_response(payload)
+        // Carry the server's SQLSTATE and message structurally; drain to
+        // ReadyForQuery first so the connection stays usable.
+        let detail = parse_error_detail(payload)
         self.drain_until_ready()
-        raise @moondb.QueryError(msg)
+        raise @moondb.Server(detail)
       }
       // 'Z' ReadyForQuery
       90 => return QueryOutcome::{ rows, command_tag, }
@@ -450,10 +452,10 @@ pub async fn PgRowStream::next(self : PgRowStream) -> Row? raise DbError {
       }
       // 'E' ErrorResponse
       69 => {
-        let msg = parse_error_response(payload)
+        let detail = parse_error_detail(payload)
         self.conn.drain_until_ready()
         self.finish()
-        raise @moondb.QueryError(msg)
+        raise @moondb.Server(detail)
       }
       // 'Z' ReadyForQuery
       90 => {
@@ -521,13 +523,17 @@ pub async fn PgConn::close(self : PgConn) -> Unit {
 }
 
 ///|
-/// Parse an ErrorResponse payload into a human-readable message, preferring the
-/// `M` (message) field and prefixing the `S`/`C` severity/code when present.
-fn parse_error_response(payload : Bytes) -> String {
+/// Parse an ErrorResponse payload into its structured [`@moondb.ServerDetail`]:
+/// severity (`S`), SQLSTATE (`C`), message (`M`), detail (`D`) and hint (`H`).
+/// PostgreSQL has no separate numeric errno — the SQLSTATE *is* the code — so
+/// `code` stays `None`.
+fn parse_error_detail(payload : Bytes) -> @moondb.ServerDetail {
   let r = ByteReader::new(payload)
   let mut severity = ""
-  let mut code = ""
+  let mut state = ""
   let mut message = ""
+  let mut detail = ""
+  let mut hint = ""
   for ;; {
     let field = r.u8() catch { _ => 0 }
     if field == 0 {
@@ -536,17 +542,59 @@ fn parse_error_response(payload : Bytes) -> String {
     let value = r.cstring() catch { _ => "" }
     match field {
       83 => severity = value // 'S'
-      67 => code = value // 'C'
+      67 => state = value // 'C'
       77 => message = value // 'M'
+      68 => detail = value // 'D'
+      72 => hint = value // 'H'
       _ => ()
     }
   }
-  let prefix = if severity != "" && code != "" {
-    severity + " " + code + ": "
-  } else {
-    ""
+  @moondb.ServerDetail::{
+    kind: @moondb.classify_sqlstate(state),
+    sqlstate: if state == "" {
+      None
+    } else {
+      Some(state)
+    },
+    code: None,
+    message,
+    detail: if detail == "" {
+      None
+    } else {
+      Some(detail)
+    },
+    hint: if hint == "" {
+      None
+    } else {
+      Some(hint)
+    },
+    severity: if severity == "" {
+      None
+    } else {
+      Some(severity)
+    },
   }
-  prefix + message
+}
+
+///|
+/// One-line rendering of a server detail on the startup path, where the failure
+/// is a `ConnectError` rather than a query-time `Server`.
+fn server_message(d : @moondb.ServerDetail) -> String {
+  let mut prefix = ""
+  match d.severity {
+    Some(sev) => prefix = sev
+    None => ()
+  }
+  match d.sqlstate {
+    Some(state) =>
+      prefix = if prefix == "" { state } else { prefix + " " + state }
+    None => ()
+  }
+  if prefix == "" {
+    d.message
+  } else {
+    prefix + ": " + d.message
+  }
 }
 
 ///|
