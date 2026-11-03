@@ -35,23 +35,25 @@ const COLLATION_BINARY : Int32 = 63
 ///|
 /// An OK packet: a statement that returned no result set (INSERT/UPDATE/DELETE/DDL)
 /// or the terminator of a successful command.
+#derive(Eq)
 pub(all) struct OkPacket {
   affected_rows : Int64
   last_insert_id : Int64
   status : Int32
   warnings : Int32
-} derive(Eq)
+}
 
 ///|
 /// One result-set column's definition, reduced to what text decoding needs: the
 /// projected name, the MySQL type code, the collation (to tell text from binary),
 /// and the column flags.
+#derive(Eq)
 pub(all) struct ColumnDef {
   name : String
   column_type : Int32
   charset : Int32
   flags : Int32
-} derive(Eq)
+}
 
 ///|
 /// Whether `payload` is an ERR packet (first byte `0xFF`).

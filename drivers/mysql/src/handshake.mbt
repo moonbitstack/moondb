@@ -63,10 +63,11 @@ pub let mariadb_client_cache_metadata : Int32 = 0x00000010
 ///|
 /// Which server dialect answered the handshake. Both speak the MySQL wire
 /// protocol; they diverge in the version string and the extended capabilities.
+#derive(Eq, Debug)
 pub(all) enum ServerKind {
   MySQL
   MariaDB
-} derive(Eq, Debug)
+}
 
 ///|
 pub impl Show for ServerKind with fn output(self : ServerKind, logger : &Logger) -> Unit {

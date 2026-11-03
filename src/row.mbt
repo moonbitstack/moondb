@@ -11,10 +11,11 @@
 /// column name ([`by_name`]/[`int_by`]/…). The typed accessors *raise* on a type
 /// or lookup mismatch rather than returning a sentinel, so a decode bug surfaces
 /// as a `DbError` at the call site instead of silently reading a zero value.
+#derive(Eq, Debug)
 pub(all) struct Row {
   columns : Array[String]
   values : Array[Value]
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Row with Eq::{equal, not_equal}
@@ -201,10 +202,11 @@ pub fn Row::blob_by(self : Row, name : String) -> Bytes raise DbError {
 /// backend's auto-increment / rowid value and is backend-defined (`0` when the
 /// statement produced none). This mirrors Go's `sql.Result` (`RowsAffected` /
 /// `LastInsertId`) and DB-API's `cursor.rowcount` / `lastrowid`.
+#derive(Eq)
 pub(all) struct ExecResult {
   rows_affected : Int64
   last_insert_id : Int64
-} derive(Eq)
+}
 
 ///|
 pub extend ExecResult with Eq::{not_equal, equal}

@@ -21,6 +21,7 @@
 /// * `Text`   — a UTF-8 string (`TEXT` / `VARCHAR`); dates and times ride here as
 ///   ISO-8601 text until a dedicated temporal case lands (see the README roadmap).
 /// * `Blob`   — an opaque byte string (`BLOB` / `BYTEA`).
+#derive(Eq, Debug)
 pub(all) enum Value {
   Null
   Bool(Bool)
@@ -29,7 +30,7 @@ pub(all) enum Value {
   Double(Double)
   Text(String)
   Blob(Bytes)
-} derive(Eq, Debug)
+}
 
 ///|
 /// The name of a value's variant (`"Null"`, `"Int"`, `"Blob"`, …). Used to build

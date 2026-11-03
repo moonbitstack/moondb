@@ -14,11 +14,12 @@
 ///   code, the 5-char SQLSTATE, and the human message verbatim.
 /// * `UnsupportedError` — a code path this round does not implement (e.g. the
 ///   caching_sha2_password full-auth exchange, a LOCAL INFILE request).
+#derive(Eq)
 pub(all) suberror MysqlError {
   ProtocolError(String)
   ServerError(Int32, String, String)
   UnsupportedError(String)
-} derive(Eq)
+}
 
 ///|
 /// A one-line rendering, e.g. `ServerError(1146, 42S02): Table 'test.t' doesn't exist`.

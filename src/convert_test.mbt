@@ -134,7 +134,8 @@ test "the typed accessors keep their messages" {
 
 ///|
 /// A type of the program's own, stored as text.
-priv struct Email(String) derive(Eq, Debug)
+#derive(Eq, Debug)
+priv struct Email(String)
 
 ///|
 impl @moondb.ToValue for Email with fn to_value(self) {

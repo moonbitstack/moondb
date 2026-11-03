@@ -36,12 +36,13 @@ fn render_value(v : @moondb.Value, mode : QuoteMode) -> Bytes {
 /// `sql_mode` combinations: there, a backslash is an ordinary character and the
 /// only escape is a doubled quote — so a backslash-escaping writer leaves the
 /// value's own quote live and the statement is injectable.
+#derive(Eq)
 pub(all) enum QuoteMode {
   /// The default: backslash escapes are honoured.
   Backslash
   /// `NO_BACKSLASH_ESCAPES` is set: `''` is the only escape.
   DoubleQuote
-} derive(Eq)
+}
 
 ///|
 /// Append `bytes` escaped for `mode`, so the value cannot end the literal it sits

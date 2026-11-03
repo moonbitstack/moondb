@@ -86,11 +86,12 @@ pub fn put_string_nul(@buffer.Buffer, Bytes) -> Unit
 pub fn put_uint_le(@buffer.Buffer, Int64, Int32) -> Unit
 
 // Errors
+#derive(Eq)
 pub(all) suberror MysqlError {
   ProtocolError(String)
   ServerError(Int32, String, String)
   UnsupportedError(String)
-} derive(Eq)
+}
 pub fn MysqlError::equal(Self, Self) -> Bool
 pub fn MysqlError::not_equal(Self, Self) -> Bool
 pub fn MysqlError::output(Self, &Logger) -> Unit
@@ -98,12 +99,13 @@ pub fn MysqlError::to_string(Self) -> String
 pub impl Show for MysqlError
 
 // Types and methods
+#derive(Eq)
 pub(all) struct ColumnDef {
   name : String
   column_type : Int32
   charset : Int32
   flags : Int32
-} derive(Eq)
+}
 pub fn ColumnDef::equal(Self, Self) -> Bool
 pub fn ColumnDef::not_equal(Self, Self) -> Bool
 
@@ -119,12 +121,13 @@ pub struct Handshake {
   auth_plugin : String
 }
 
+#derive(Eq)
 pub(all) struct OkPacket {
   affected_rows : Int64
   last_insert_id : Int64
   status : Int32
   warnings : Int32
-} derive(Eq)
+}
 pub fn OkPacket::equal(Self, Self) -> Bool
 pub fn OkPacket::not_equal(Self, Self) -> Bool
 
@@ -145,17 +148,19 @@ pub fn PacketReader::string_nul(Self) -> Bytes raise MysqlError
 pub fn PacketReader::u8(Self) -> Int32 raise MysqlError
 pub fn PacketReader::uint_le(Self, Int32) -> Int64 raise MysqlError
 
+#derive(Eq)
 pub(all) enum QuoteMode {
   Backslash
   DoubleQuote
-} derive(Eq)
+}
 pub fn QuoteMode::equal(Self, Self) -> Bool
 pub fn QuoteMode::not_equal(Self, Self) -> Bool
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ServerKind {
   MySQL
   MariaDB
-} derive(Eq, @debug.Debug)
+}
 pub fn ServerKind::equal(Self, Self) -> Bool
 pub fn ServerKind::not_equal(Self, Self) -> Bool
 pub fn ServerKind::output(Self, &Logger) -> Unit
