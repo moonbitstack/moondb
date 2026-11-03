@@ -26,10 +26,12 @@ pub fn MysqlConn::close(Self) -> Unit
 pub async fn MysqlConn::commit(Self) -> Unit
 pub async fn MysqlConn::connect(String, Int32, String, String, String, tls? : @tls.Client) -> Self
 pub async fn MysqlConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult
+pub async fn MysqlConn::ping(Self) -> Bool
 pub async fn MysqlConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row]
 pub async fn MysqlConn::query_stream(Self, String, Array[@moondb.Value]) -> MysqlRowStream
 pub async fn MysqlConn::rollback(Self) -> Unit
 pub fn MysqlConn::server_kind(Self) -> @moonmysql.ServerKind
+pub impl @moondb.AsyncDriver for MysqlConn
 
 pub struct MysqlDriver {
   host : String
@@ -58,6 +60,7 @@ pub struct MysqlRowStream {
 }
 pub async fn MysqlRowStream::close(Self) -> Unit
 pub async fn MysqlRowStream::next(Self) -> @moondb.Row?
+pub impl @moondb.AsyncCursor for MysqlRowStream
 
 // Type aliases
 

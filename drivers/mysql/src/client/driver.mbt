@@ -180,3 +180,91 @@ pub extend MysqlDriver with @moondb.Driver::{
   query,
   rollback,
 }
+
+// The async seam. `MysqlConn` owns its socket for its whole lifetime — unlike
+// `MysqlDriver`, which reconnects per call — so it is the connection that
+// supports real transactions and belongs in an async pool.
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn execute(
+  self : MysqlConn,
+  sql : String,
+  params : Array[@moondb.Value],
+) -> @moondb.ExecResult raise @moondb.DbError {
+  MysqlConn::execute(self, sql, params) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn query(
+  self : MysqlConn,
+  sql : String,
+  params : Array[@moondb.Value],
+) -> Array[@moondb.Row] raise @moondb.DbError {
+  MysqlConn::query(self, sql, params) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn query_stream(
+  self : MysqlConn,
+  sql : String,
+  params : Array[@moondb.Value],
+) -> &@moondb.AsyncCursor raise @moondb.DbError {
+  MysqlConn::query_stream(self, sql, params) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn begin(self : MysqlConn) -> Unit raise @moondb.DbError {
+  MysqlConn::begin(self) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn commit(self : MysqlConn) -> Unit raise @moondb.DbError {
+  MysqlConn::commit(self) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn rollback(self : MysqlConn) -> Unit raise @moondb.DbError {
+  MysqlConn::rollback(self) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncDriver for MysqlConn with fn close(self : MysqlConn) -> Unit {
+  MysqlConn::close(self)
+}
+
+///|
+pub impl @moondb.AsyncCursor for MysqlRowStream with fn next(
+  self : MysqlRowStream,
+) -> @moondb.Row? raise @moondb.DbError {
+  // The stream's own `next` reports wire failures as `MysqlError`; the seam
+  // speaks `DbError`, so a transport/decoding failure is mapped at the boundary.
+  MysqlRowStream::next(self) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub impl @moondb.AsyncCursor for MysqlRowStream with fn close(
+  self : MysqlRowStream,
+) -> Unit {
+  // Closing never surfaces a failure: the caller is done with the result either
+  // way, and a half-read connection is dropped by `release`'s reset.
+  MysqlRowStream::close(self) catch {
+    _ => ()
+  }
+}
+
+///|
+pub extend MysqlConn with @moondb.AsyncDriver::{ping}
