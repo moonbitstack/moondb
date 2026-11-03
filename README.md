@@ -7,7 +7,7 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-184%20passing-2ea44f)](#tests)
+[![tests](https://img.shields.io/badge/tests-213%20passing-2ea44f)](#tests)
 [![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -16,7 +16,7 @@ The small, pure contract that sits between database *drivers* and query *layers*
 
 > Moved on mooncakes from `Lfan-ke/moondb` to `moonbitstack/moondb`.
 
-`moondb` defines **one thing**: the boundary every SQL database backend implements and every ORM / query builder is written against. The interface package has **zero dependencies**, is **pure** (compiles on wasm, wasm-gc, js, and native alike), and ships a dependency-free reference driver so the whole stack above it can be tested without a database. The connection pool lives in its own package, `moonbitstack/moondb/pool`, so a driver that only implements the interface carries none of the pool's dependencies.
+`moondb` defines **one thing**: the boundary every SQL database backend implements and every ORM / query builder is written against. The interface package has **zero dependencies**, is **pure** (compiles on wasm, wasm-gc, js, and native alike), and ships a dependency-free reference driver so the whole stack above it can be tested without a database. The connection pools live in their own packages — `moonbitstack/moondb/pool` for the synchronous `Driver`, `moonbitstack/moondb/apool` for the async one — so a driver that only implements the interface carries none of the pool's dependencies, and a synchronous driver never pulls in an async runtime.
 
 It deliberately does *not* connect to a database, speak a wire protocol, or build SQL. Those belong on either side of the seam:
 
@@ -59,6 +59,7 @@ moon add moonbitstack/moondb
 | [`DbError`](#dberror) | the one error every operation raises | DB-API exception hierarchy (flattened) |
 | [`Driver`](#driver) | the trait a backend implements / a query layer targets (with a default `ping` health probe) | Go `driver.Conn`+`Execer`+`Queryer`+`Pinger` |
 | [`@pool.Pool`](pool/) | a fixed-ceiling connection pool over any `Driver`, in `moonbitstack/moondb/pool` | Go `sql.DB` pool, SQLAlchemy `QueuePool` |
+| [`@apool.AsyncPool`](apool/) | the same pool for an `AsyncDriver`, where an exhausted acquire really waits, in `moonbitstack/moondb/apool` | `database/sql` waiting, SQLAlchemy `QueuePool(timeout=…)` |
 | [`AsyncDriver`](#asyncdriver) | the same contract for a backend reached over a socket, every method awaited | asyncpg / `asyncio` DB-API |
 | [`AsyncCursor`](#asyncdriver) | forward-only cursor whose `next` is awaited, for a wire driver's live rows | — |
 | [`MockDriver`](#mockdriver) | dependency-free in-memory reference driver, for tests | — |
@@ -153,6 +154,10 @@ pub impl @moondb.Driver for MyConn with execute(self, sql, params) {
 
 - **The pool is synchronous, and its counting is moonpool's.** `@pool.Pool[D]` reuses idle connections under a size ceiling, evicts a connection that fails its `pre_ping` probe or outlives `max_lifetime` (age measured by an injected `clock`, the way `database/sql` swaps `nowFunc` in tests), and offers a non-blocking `try_acquire`. Because moondb's base contract is sync and the pure backends have no threads, an exhausted `acquire` fails immediately rather than blocking — the `acquire_timeout` is the budget an async driver layers real waiting on top of. `ping` is a default `Driver` method (`SELECT 1`), so every driver gets a health probe for free. The bookkeeping underneath — how many are live, which are idle, when each was born — is [moonpool](https://github.com/moonbitstack/moonpool)'s `Pool`, and so is the optional `ward` in front of the database: a backoff after failed connects (`acquire` then raises `ConnectError` until the delay has passed), a token bucket spacing reconnections, a breaker that stops connecting to a failing backend, a shedder. This package adds only opening, closing and probing. It is a separate package because that dependency is the pool's alone: `import { "moonbitstack/moondb/pool" }` where a pool is wanted, and the interface stays dependency-free where it is not.
 
+- **The async pool is where an exhausted acquire actually waits.** `@apool.AsyncPool[D]` is the counterpart for an `AsyncDriver`, and it exists because the synchronous pool cannot do the one thing a full pool is supposed to do. In `@pool.Pool` nothing can return a connection while a caller sits inside `acquire`, so a full pool fails immediately and `acquire_timeout` is only a number in the message. In an event loop, other tasks keep running while one waits — so `AsyncPool` puts the wait on a `Semaphore` with one permit per allowed checkout (`max_size + overflow`) and parks the caller there. `release` returns the permit and wakes exactly one waiter; `acquire_timeout` becomes a real deadline. The bookkeeping is still moonpool's, and `overflow`, `pre_ping`, `max_lifetime` and the `reset` hook mean what they mean in the sync pool — a returned connection is reset before it is reusable, and a connection that came from the overflow allowance is closed rather than idled so the pool settles back to `max_size`. It lives in its own package because it is the one part of moondb that imports `moonbitlang/async`: no synchronous driver reaches it, and the interface package itself still imports nothing. (The module declares the runtime so that package can resolve; a consumer that only wants the interface pays for a download, not for an async dependency in its own build.)
+
+- **The PostgreSQL protocol state machine is testable without a machine.** `PgConn` speaks over a `PgWire`, which is either a socket (plain or TLS-wrapped) or one end of an in-memory pipe pair. That seam is what lets the parts that used to be unreachable — statement sequencing, the streaming guard that refuses a second statement while a `PgRowStream` is open, draining the rest of a result after an `ErrorResponse`, the COPY sub-protocol, notifications, the statement cache — run against a scripted peer in a unit test, byte for byte, with no server and no network. The live integration suites still exist and still run against real TLS-enabled servers; the offline tests are what catch a regression on a laptop with no database.
+
 ## Roadmap
 
 v0.1 fixes the smallest contract that a relational backend and a query layer both need, so it can stabilise. Planned, additive extensions (none of which change the v0.1 surface):
@@ -164,7 +169,7 @@ v0.1 fixes the smallest contract that a relational backend and a query layer bot
 
 ## Tests
 
-The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics — and the connection pool. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red, and disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red. They run on all four backends:
+The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics — both connection pools, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; and dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red. They run on all four backends:
 
 ```bash
 moon test --target all

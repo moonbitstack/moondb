@@ -30,6 +30,7 @@ SITES = [
         "packages": [
             ("src", "moonbitstack/moondb", "moondb", "moondb"),
             ("src/pool", "moonbitstack/moondb/pool", "pool", "pool"),
+            ("src/apool", "moonbitstack/moondb/apool", "apool", "apool"),
             ("drivers/sqlite/src", "moonbitstack/moonsqlite", "moonsqlite", "moonsqlite"),
             ("drivers/postgres/src", "moonbitstack/moonpostgres", "moonpostgres", "moonpostgres"),
             ("drivers/mysql/src", "moonbitstack/moonmysql", "moonmysql", "moonmysql"),

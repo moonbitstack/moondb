@@ -38,8 +38,9 @@
         <div class="grp">Packages</div>
         <a href="#moondb">moondb<span class="n">73</span></a>
 <a href="#pool">pool<span class="n">16</span></a>
+<a href="#apool">apool<span class="n">12</span></a>
 <a href="#moonsqlite">moonsqlite<span class="n">14</span></a>
-<a href="#moonpostgres">moonpostgres<span class="n">55</span></a>
+<a href="#moonpostgres">moonpostgres<span class="n">61</span></a>
 <a href="#moonmysql">moonmysql<span class="n">69</span></a>
 <a href="#moonmysql-client">client<span class="n">14</span></a>
       </aside>
@@ -48,7 +49,7 @@
         <section class="hero" style="padding-top:var(--s5)">
           <p class="folio">API · generated</p>
           <h1 style="font-size:clamp(30px,4vw,46px)">The interface</h1>
-          <p class="lede">241 declarations across 6 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
+          <p class="lede">259 declarations across 7 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
         </section>
 <section class="section first" id="moondb">
 <p class="folio">moonbitstack/moondb</p>
@@ -234,6 +235,26 @@
 <div class="entry"><pre class="signature">pub fn[D : @moondb.Driver] Pool::try_acquire(Self[D]) -&gt; D? raise @moondb.DbError</pre><div class="doc"><p>Take a connection only if one is immediately available — an idle one or fresh headroom under <code class="inline">max_size</code> — returning <code class="inline">None</code> instead of raising when the pool is exhausted or its ward says no. This is the non-blocking counterpart of [<code class="inline">acquire</code>], so a caller can choose to shed load or retry. Health and lifetime eviction apply exactly as in <code class="inline">acquire</code>; a genuine failure while opening a fresh connection (the <code class="inline">make</code> factory raising) still propagates.</p></div></div>
 <div class="entry"><pre class="signature">pub fn[D : @moondb.Driver, R] Pool::with_conn(Self[D], (D) -&gt; R raise @moondb.DbError) -&gt; R raise @moondb.DbError</pre><div class="doc"><p>Run <code class="inline">f</code> with a pooled connection, returning it afterwards whether <code class="inline">f</code> returns or raises. This is the leak-proof way to use the pool: the <code class="inline">release</code> happens on every path, so a raising query never strands a connection checked out.</p></div></div>
 </section>
+<section class="section" id="apool">
+<p class="folio">moonbitstack/moondb/apool</p>
+<h2>apool</h2>
+<h3>Types <span class="count">1</span></h3>
+<div class="entry"><pre class="signature">pub struct AsyncPool[D] {
+  // private fields
+}</pre><div class="doc"><p>A connection pool for an [<code class="inline">@moondb.AsyncDriver</code>] — the counterpart of [<code class="inline">@moondb/pool.Pool</code>] for a backend reached over the network. It exists because a synchronous pool cannot do the one thing an exhausted pool is supposed to do: wait. In [<code class="inline">@moondb/pool.Pool</code>] nothing can return a connection while a caller is inside <code class="inline">acquire</code>, so a full pool fails immediately and <code class="inline">acquire_timeout_ms</code> only reaches the error message. Here the caller is a task in an event loop: other tasks keep running while it waits, so a full pool parks the caller on a permit and wakes it when a connection comes home. And it is what makes <code class="inline">overflow</code> and a real timeout meaningful. The division of labour mirrors the sync pool: [<code class="inline">@moonpool</code>] keeps the accounting — live, idle, lent, each connection's birth time — and this type adds what only a driver can do (opening, probing, resetting, closing) plus the permit that makes an exhausted acquire wait. ``<code class="inline">moonbit let pool : @apool.AsyncPool[@postgres.PgConn] = @apool.AsyncPool::new( () =&gt; @postgres.PgConn::connect("db", 5432, "app", "secret", "app"), max_size=8, overflow=2, pre_ping=true, acquire_timeout_ms=3000L, reset=conn =&gt; conn.rollback() catch { _ =&gt; () }, ) let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", [])) </code>``</p></div></div>
+<h3>Functions &amp; methods <span class="count">11</span></h3>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::acquire_timeout_ms(Self[D]) -&gt; Int64</pre><div class="doc"><p>How long an acquire may wait for a permit in milliseconds (<code class="inline">0</code> = no limit).</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::capacity(Self[D]) -&gt; Int32</pre><div class="doc"><p>The hard ceiling on concurrent checkouts: <code class="inline">max_size + overflow</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::idle_count(Self[D]) -&gt; Int32</pre><div class="doc"><p>How many connections are idle and reusable right now.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::in_use_count(Self[D]) -&gt; Int32</pre><div class="doc"><p>How many connections are lent out right now.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::is_closed(Self[D]) -&gt; Bool</pre><div class="doc"><p>Whether [<code class="inline">close_all</code>] has been called.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::max_lifetime_ms(Self[D]) -&gt; Int64</pre><div class="doc"><p>The configured connection lifetime in milliseconds (<code class="inline">0</code> = unlimited).</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::max_size(Self[D]) -&gt; Int32</pre><div class="doc"><p>The steady-state ceiling on open connections.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::new(async () -&gt; D raise @moondb.DbError, max_size? : Int32, overflow? : Int32, max_lifetime_ms? : Int64, pre_ping? : Bool, acquire_timeout_ms? : Int64, clock? : () -&gt; Int64, ward? : @moonpool.Ward, reset? : async (D) -&gt; Unit raise @moondb.DbError, rand? : () -&gt; Double, cpu? : () -&gt; Int32) -&gt; Self[D] raise @moondb.DbError</pre><div class="doc"><p>Build a pool whose connections come from <code class="inline">make</code>, which runs inside the event loop and may await the handshake.</p><p>* <code class="inline">max_size</code> caps the steady-state number of open connections (default 10) and must be positive. * <code class="inline">overflow</code> is how many connections may be opened above <code class="inline">max_size</code> while every steady-state connection is lent; a connection that came from that allowance is closed on return rather than idled, so the pool settles back to <code class="inline">max_size</code>. * <code class="inline">max_lifetime_ms</code> retires a connection older than this on acquire (<code class="inline">0</code>, the default, means no age limit). Enforcing it requires a real <code class="inline">clock</code>. * <code class="inline">pre_ping</code> probes an idle connection with [<code class="inline">AsyncDriver::ping</code>] before handing it out, closing it and trying the next if the backend has dropped it. * <code class="inline">acquire_timeout_ms</code> is how long a caller may wait for a permit before failing (<code class="inline">0</code>, the default, means wait as long as it takes — the pool never gives up on its own). * <code class="inline">reset</code> runs on return before the connection becomes reusable: roll back a leftover transaction, clear session state. A reset that raises closes the connection instead of pooling it. * <code class="inline">clock</code> returns monotonic milliseconds and defaults to a constant <code class="inline">0</code>, which disables age-based retirement; <code class="inline">rand</code>/<code class="inline">cpu</code> feed the ward's jitter and shedder.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::open_count(Self[D]) -&gt; Int32</pre><div class="doc"><p>How many connections the pool has open: lent plus idle.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::overflow(Self[D]) -&gt; Int32</pre><div class="doc"><p>How many connections may be opened above <code class="inline">max_size</code> while the pool is busy.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[D] AsyncPool::pre_ping(Self[D]) -&gt; Bool</pre><div class="doc"><p>Whether the pre-ping probe is enabled.</p></div></div>
+</section>
 <section class="section" id="moonsqlite">
 <p class="folio">moonbitstack/moonsqlite</p>
 <h2>moonsqlite</h2>
@@ -260,9 +281,9 @@
 <section class="section" id="moonpostgres">
 <p class="folio">moonbitstack/moonpostgres</p>
 <h2>moonpostgres</h2>
-<h3>Types <span class="count">3</span></h3>
+<h3>Types <span class="count">4</span></h3>
 <div class="entry"><pre class="signature">pub struct PgConn {
-  stream : @tcp.Conn
+  stream : PgWire
   host : String
   port : Int32
   mut closed : Bool
@@ -286,7 +307,10 @@
   mut col_oids : Array[Int32]
   mut done : Bool
 }</pre><div class="doc"><p>A forward-only cursor that reads a query's rows off the wire on demand instead of buffering them, the streaming counterpart to [<code class="inline">query</code>], for results too large to materialise (asyncpg's cursor. It is bound to its <code class="inline">PgConn</code>, which is a single-statement pipeline: the stream must be drained (<code class="inline">next</code> returns <code class="inline">None</code>) or [<code class="inline">close</code>d](PgRowStream::close) before another statement runs on that connection.</p></div></div>
-<h3>Functions &amp; methods <span class="count">52</span></h3>
+<div class="entry"><pre class="signature">pub struct PgWire {
+  // private fields
+}</pre><div class="doc"><p>The byte channel a connection speaks the PostgreSQL v3 protocol over.</p><p>A real connection uses a socket — plain, or a TLS session layered on one. The protocol code above it, though, only ever needs three things: read exactly *n* bytes, write these bytes, close. Pulling that out of [<code class="inline">PgConn</code>] is what lets the state machine (statement sequencing, the streaming guard, error draining, COPY, notifications) be tested against a scripted peer with no machine and no server behind it: [<code class="inline">pipe</code>](PgWire::pipe) hands it one end of an in-memory pipe pair and the test plays the server on the other.</p><p>It is an enum rather than a trait object because the two transports have different concrete types already (<code class="inline">@tcp.Conn</code>, <code class="inline">@io.PipeRead</code> + <code class="inline">@io.PipeWrite</code>) and a closed set keeps the dispatch a match with no allocation.</p></div></div>
+<h3>Functions &amp; methods <span class="count">57</span></h3>
 <div class="entry"><pre class="signature">pub fn build_bind(Array[@moondb.Value]) -&gt; Bytes</pre><div class="doc"><p>Bind ('B'): bind <code class="inline">params</code> (all text format) to the unnamed statement, producing the unnamed portal, and request all result columns in text format.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_bind_named(String, String, Array[@moondb.Value]) -&gt; Bytes</pre><div class="doc"><p>Bind ('B') <code class="inline">params</code> to a named (or unnamed) prepared statement, producing a named (or unnamed) portal. All parameters and result columns use text format.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_cancel_request(Int32, Int32) -&gt; Bytes</pre><div class="doc"><p>CancelRequest: Int32 length <code class="inline">16</code>, Int32 request code <code class="inline">80877102</code>, then the backend process id and secret key from <code class="inline">BackendKeyData</code>. Sent on a *new* connection to ask the server to cancel the query running on the old one.</p></div></div>
@@ -331,8 +355,13 @@
 <div class="entry"><pre class="signature">pub fn parse_int64(String) -&gt; Int64?</pre><div class="doc"><p>Parse a base-10 <code class="inline">Int64</code>, or <code class="inline">None</code> on any non-digit (after an optional sign).</p></div></div>
 <div class="entry"><pre class="signature">pub fn pg_md5_password(String, String, Bytes) -&gt; String</pre><div class="doc"><p><code class="inline">"md5" + hex(md5(hex(md5(password + user)) + salt))</code>.</p><p>It is what the server asks for and nothing else uses it, which is why the shape is stated rather than assembled from parts a caller might reorder.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgConn::backend_pid(Self) -&gt; Int32</pre><div class="doc"><p>The backend process id, from BackendKeyData.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgConn::is_closed(Self) -&gt; Bool</pre><div class="doc"><p>Whether [<code class="inline">close</code>](PgConn::close) has been called. A closed connection refuses further statements with [<code class="inline">@moondb.Closed</code>].</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgConn::is_streaming(Self) -&gt; Bool</pre><div class="doc"><p>Whether a [<code class="inline">PgRowStream</code>] is still outstanding. While one is, this connection refuses new statements — the wire is a single-statement pipeline — until the stream is drained or [closed](PgRowStream::close).</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgConn::parameter(Self, String) -&gt; String?</pre><div class="doc"><p>A session parameter the server reported (<code class="inline">server_version</code>, <code class="inline">client_encoding</code>, <code class="inline">TimeZone</code>, …), or <code class="inline">None</code> if it has not been reported.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgDriver::new(host~ : String, port? : Int32, user~ : String, password? : String, database~ : String) -&gt; Self</pre><div class="doc"><p>Build a connection descriptor. Does not connect: PostgreSQL I/O is async, so the connection is opened by [<code class="inline">connect</code>](PgDriver::connect) inside an event loop.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgWire::close(Self) -&gt; Unit</pre><div class="doc"><p>Close the channel. Idempotent at the transport level, so a double close after a failed handshake is harmless.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgWire::pipe(@io.PipeRead, @io.PipeWrite) -&gt; Self</pre><div class="doc"><p>Wrap the client end of an in-memory pipe pair: <code class="inline">from_server</code> is where the peer's writes arrive, <code class="inline">to_server</code> is where this connection's writes go. Used by the offline protocol tests; a live connection never takes this path.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgWire::tcp(@tcp.Conn) -&gt; Self</pre><div class="doc"><p>Wrap a socket — plain, or the TLS session <code class="inline">@tcp.Conn::client</code> returned.</p></div></div>
 <div class="entry"><pre class="signature">pub fn saslprep(String) -&gt; String</pre><div class="doc"><p>SASLprep (RFC 4013) on a password before SCRAM: map the non-ASCII space characters to U+0020, drop the "commonly mapped to nothing" code points, then NFKC-normalize. An ASCII password is returned unchanged, which is the common case; a non-ASCII one would otherwise derive a different key from the server's stored verifier.</p></div></div>
 <div class="entry"><pre class="signature">pub fn scram_client_final(Bytes, String, String, gs2_header? : String, cbind? : Bytes?) -&gt; (String, Bytes) raise @moondb.DbError</pre><div class="doc"><p>Build the SCRAM client-final message and the expected server signature from the server's first message (RFC 5802). <code class="inline">client_first_bare</code> is <code class="inline">n=…,r=clientnonce</code>; <code class="inline">server_first</code> is <code class="inline">r=nonce,s=salt,i=iters</code>. Returns <code class="inline">(client_final_message, server_signature)</code> — the client sends the first and verifies the server's <code class="inline">v=</code> against the base64 of the second.</p></div></div>
 <div class="entry"><pre class="signature">pub fn scram_client_proof(Bytes, Bytes) -&gt; Bytes</pre><div class="doc"><p>The SCRAM ClientProof for the AuthMessage: <code class="inline">ClientKey XOR HMAC(StoredKey, AuthMessage)</code>, where ClientKey = HMAC(SaltedPassword, "Client Key") and StoredKey = SHA256(ClientKey) (RFC 5802 §3).</p></div></div>
