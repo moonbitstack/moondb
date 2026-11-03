@@ -14,12 +14,23 @@
 /// pipeline per connection.
 pub struct PgConn {
   stream : @tcp.Conn
+  host : String
+  port : Int32
   mut closed : Bool
   // Set while a `PgRowStream` is outstanding. The wire is a strict per-connection
   // pipeline, so a new statement issued before the stream is drained/closed would
   // read the old result's leftover packets and desync the connection; guarding on
   // this turns that silent corruption into a clear error.
   mut streaming : Bool
+  // Session parameters the server reported (`server_version`, `client_encoding`,
+  // `TimeZone`, …), updated whenever a ParameterStatus arrives.
+  params : Map[String, String]
+  // BackendKeyData, the pair a CancelRequest quotes to cancel this query.
+  mut pid : Int32
+  mut secret : Int32
+  // SQL → named prepared statement, so a repeated query re-parses only once.
+  statements : Map[String, String]
+  mut next_stmt : Int32
 }
 
 ///|
@@ -84,7 +95,18 @@ pub async fn PgConn::connect(
   } else {
     None
   }
-  let conn = PgConn::{ stream, closed: false, streaming: false, }
+  let conn = PgConn::{
+    stream,
+    host,
+    port,
+    closed: false,
+    streaming: false,
+    params: Map([]),
+    pid: 0,
+    secret: 0,
+    statements: Map([]),
+    next_stmt: 0,
+  }
   // Close the socket on any handshake failure (a bad-password ErrorResponse is the
   // common case) — MoonBit has no fd finalizer, so a raise here would leak it.
   errdefer conn.stream.close()
@@ -164,7 +186,18 @@ async fn PgConn::run_startup(
         raise @moondb.ConnectError(server_message(parse_error_detail(payload)))
       // 'Z' ReadyForQuery
       90 => return
-      // 'S' ParameterStatus / 'K' BackendKeyData / 'N' NoticeResponse — ignore
+      // 'K' BackendKeyData — the pid/secret a CancelRequest quotes.
+      75 => {
+        let r = ByteReader::new(payload)
+        self.pid = r.i32()
+        self.secret = r.i32()
+      }
+      // 'S' ParameterStatus — a session setting the server reports.
+      83 => {
+        let r = ByteReader::new(payload)
+        self.params.set(r.cstring(), r.cstring())
+      }
+      // 'N' NoticeResponse — ignore
       _ => ()
     }
   }
@@ -304,8 +337,13 @@ async fn PgConn::read_results(self : PgConn) -> QueryOutcome raise DbError {
         raise @moondb.QueryError(
           "protocol: COPY is not supported by this driver",
         )
+      // 'S' ParameterStatus — update the session map, then keep reading.
+      83 => {
+        let r = ByteReader::new(payload)
+        self.params.set(r.cstring(), r.cstring())
+      }
       // '1' ParseComplete / '2' BindComplete / 'n' NoData / 't' ParamDesc /
-      // 'I' EmptyQueryResponse / 'S' ParameterStatus / 'N' NoticeResponse
+      // 'I' EmptyQueryResponse / 'N' NoticeResponse
       _ => ()
     }
   }
@@ -423,14 +461,39 @@ async fn PgConn::send_statement(
     self.write_all(build_query(sql))
   } else {
     let translated = translate_placeholders(sql)
-    let batch = concat_bytes(
-      concat_bytes(
-        concat_bytes(build_parse(translated), build_bind(params)),
-        concat_bytes(build_describe_portal(), build_execute()),
-      ),
-      build_sync(),
-    )
+    let (name, fresh) = self.statement_for(sql, translated)
+    // Parse only the first time this SQL is seen; later calls Bind the cached
+    // named statement. The unnamed portal carries this call's parameters.
+    let mut batch = if fresh {
+      build_parse_named(name, translated)
+    } else {
+      b""
+    }
+    batch = concat_bytes(batch, build_bind_named("", name, params))
+    batch = concat_bytes(batch, build_describe_portal())
+    batch = concat_bytes(batch, build_execute())
+    batch = concat_bytes(batch, build_sync())
     self.write_all(batch)
+  }
+}
+
+///|
+/// The named prepared statement for `sql`, registering it on first use. Returns
+/// the name and whether it was newly registered (so the caller emits Parse only
+/// once).
+fn PgConn::statement_for(
+  self : PgConn,
+  sql : String,
+  _translated : String,
+) -> (String, Bool) {
+  match self.statements.get(sql) {
+    Some(name) => (name, false)
+    None => {
+      self.next_stmt += 1
+      let name = "s" + self.next_stmt.to_string()
+      self.statements.set(sql, name)
+      (name, true)
+    }
   }
 }
 
@@ -664,6 +727,167 @@ fn command_tag_rows(tag : String) -> Int64 {
     Some(n) => n
     None => 0
   }
+}
+
+///|
+/// A session parameter the server reported (`server_version`, `client_encoding`,
+/// `TimeZone`, …), or `None` if it has not been reported.
+pub fn PgConn::parameter(self : PgConn, name : String) -> String? {
+  self.params.get(name)
+}
+
+///|
+/// The backend process id, from BackendKeyData.
+pub fn PgConn::backend_pid(self : PgConn) -> Int32 {
+  self.pid
+}
+
+///|
+/// Cancel the query currently running on this connection. PostgreSQL requires the
+/// request on a *separate* connection: this opens one, sends CancelRequest with
+/// the backend key, and closes it.
+pub async fn PgConn::cancel(self : PgConn) -> Unit raise DbError {
+  let addr = @socket.Addr::resolve(self.host, port=self.port) catch {
+    e => raise @moondb.ConnectError("resolve \{self.host}: \{e}")
+  }
+  let tcp = @socket.Tcp::connect(addr) catch {
+    e => raise @moondb.ConnectError("cancel connect: \{e}")
+  }
+  (tcp : &@io.Writer).write(build_cancel_request(self.pid, self.secret)) catch {
+    e => {
+      tcp.close()
+      raise @moondb.ConnectError("cancel write: \{e}")
+    }
+  }
+  tcp.close()
+}
+
+///|
+/// Declare a server-side cursor over `sql` inside the current transaction. The
+/// caller must be inside an explicit transaction (`begin`); the cursor is closed
+/// by `close_cursor` or at `commit`/`rollback`.
+pub async fn PgConn::declare_cursor(
+  self : PgConn,
+  name : String,
+  sql : String,
+) -> Unit raise DbError {
+  self.run_statement("DECLARE " + quote_ident(name) + " CURSOR FOR " + sql, [])
+  |> ignore
+}
+
+///|
+/// Fetch up to `count` rows forward from a declared cursor.
+pub async fn PgConn::fetch_cursor(
+  self : PgConn,
+  name : String,
+  count : Int32,
+) -> Array[Row] raise DbError {
+  let sql = "FETCH FORWARD " + count.to_string() + " FROM " + quote_ident(name)
+  self.run_statement(sql, []).rows
+}
+
+///|
+/// Close a declared cursor.
+pub async fn PgConn::close_cursor(
+  self : PgConn,
+  name : String,
+) -> Unit raise DbError {
+  self.run_statement("CLOSE " + quote_ident(name), []) |> ignore
+}
+
+///|
+/// Start listening on `channel`; `next_notification` then yields the payloads
+/// other sessions send with `NOTIFY`.
+pub async fn PgConn::listen(
+  self : PgConn,
+  channel : String,
+) -> Unit raise DbError {
+  self.run_statement("LISTEN " + quote_ident(channel), []) |> ignore
+}
+
+///|
+/// Stop listening on `channel` (or every channel when `channel` is `"*"`).
+pub async fn PgConn::unlisten(
+  self : PgConn,
+  channel : String,
+) -> Unit raise DbError {
+  let sql = if channel == "*" {
+    "UNLISTEN *"
+  } else {
+    "UNLISTEN " + quote_ident(channel)
+  }
+  self.run_statement(sql, []) |> ignore
+}
+
+///|
+/// Send a notification on `channel`, optionally carrying `payload`.
+pub async fn PgConn::notify(
+  self : PgConn,
+  channel : String,
+  payload~ : String = "",
+) -> Unit raise DbError {
+  let mut sql = "NOTIFY " + quote_ident(channel)
+  if payload != "" {
+    sql = sql + ", '" + escape_sql_literal(payload) + "'"
+  }
+  self.run_statement(sql, []) |> ignore
+}
+
+///|
+/// Block until a notification arrives on a channel this connection listens on,
+/// returning `(channel, payload)`. Skips ParameterStatus and ReadyForQuery while
+/// waiting; an ErrorResponse raises.
+pub async fn PgConn::next_notification(
+  self : PgConn,
+) -> (String, String) raise DbError {
+  if self.closed {
+    raise @moondb.Closed
+  }
+  for ;; {
+    let (tag, payload) = self.read_message()
+    match tag {
+      // 'A' NotificationResponse: pid, channel, payload.
+      65 => {
+        let r = ByteReader::new(payload)
+        r.i32() |> ignore
+        return (r.cstring(), r.cstring())
+      }
+      69 => raise @moondb.Server(parse_error_detail(payload))
+      83 => {
+        let r = ByteReader::new(payload)
+        self.params.set(r.cstring(), r.cstring())
+      }
+      _ => ()
+    }
+  }
+}
+
+///|
+/// Quote an SQL identifier with double quotes, doubling any embedded quote.
+fn quote_ident(name : String) -> String {
+  let sb = StringBuilder()
+  sb.write_char('"')
+  for i in 0..<name.length() {
+    if name[i].to_int() == 34 {
+      sb.write_char('"')
+    }
+    sb.write_char(name[i].unsafe_to_char())
+  }
+  sb.write_char('"')
+  sb.to_string()
+}
+
+///|
+/// Escape a string literal's body by doubling single quotes.
+fn escape_sql_literal(s : String) -> String {
+  let sb = StringBuilder()
+  for i in 0..<s.length() {
+    if s[i].to_int() == 39 {
+      sb.write_char('\'')
+    }
+    sb.write_char(s[i].unsafe_to_char())
+  }
+  sb.to_string()
 }
 
 ///|

@@ -42,11 +42,17 @@ pub const OID_UUID : Int32 = 2950
 
 pub fn build_bind(Array[@moondb.Value]) -> Bytes
 
+pub fn build_bind_named(String, String, Array[@moondb.Value]) -> Bytes
+
+pub fn build_cancel_request(Int32, Int32) -> Bytes
+
 pub fn build_describe_portal() -> Bytes
 
 pub fn build_execute() -> Bytes
 
 pub fn build_parse(String) -> Bytes
+
+pub fn build_parse_named(String, String) -> Bytes
 
 pub fn build_password(String) -> Bytes
 
@@ -99,18 +105,35 @@ pub fn utf8_decode(Bytes) -> String
 // Types and methods
 pub struct PgConn {
   stream : @tcp.Conn
+  host : String
+  port : Int32
   mut closed : Bool
   mut streaming : Bool
+  params : Map[String, String]
+  mut pid : Int32
+  mut secret : Int32
+  statements : Map[String, String]
+  mut next_stmt : Int32
 }
+pub fn PgConn::backend_pid(Self) -> Int32
 pub async fn PgConn::begin(Self) -> Unit raise @moondb.DbError
+pub async fn PgConn::cancel(Self) -> Unit raise @moondb.DbError
 pub async fn PgConn::close(Self) -> Unit
+pub async fn PgConn::close_cursor(Self, String) -> Unit raise @moondb.DbError
 pub async fn PgConn::commit(Self) -> Unit raise @moondb.DbError
 pub async fn PgConn::connect(String, Int32, String, String, String, tls? : @tls.Client) -> Self raise @moondb.DbError
+pub async fn PgConn::declare_cursor(Self, String, String) -> Unit raise @moondb.DbError
 pub async fn PgConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
+pub async fn PgConn::fetch_cursor(Self, String, Int32) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn PgConn::listen(Self, String) -> Unit raise @moondb.DbError
+pub async fn PgConn::next_notification(Self) -> (String, String) raise @moondb.DbError
+pub async fn PgConn::notify(Self, String, payload? : String) -> Unit raise @moondb.DbError
+pub fn PgConn::parameter(Self, String) -> String?
 pub async fn PgConn::ping(Self) -> Bool
 pub async fn PgConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
 pub async fn PgConn::query_stream(Self, String, Array[@moondb.Value]) -> PgRowStream raise @moondb.DbError
 pub async fn PgConn::rollback(Self) -> Unit raise @moondb.DbError
+pub async fn PgConn::unlisten(Self, String) -> Unit raise @moondb.DbError
 pub impl @moondb.AsyncDriver for PgConn
 
 pub struct PgDriver {

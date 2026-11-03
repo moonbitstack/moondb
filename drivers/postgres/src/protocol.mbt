@@ -141,8 +141,15 @@ pub fn build_query(sql : String) -> Bytes {
 /// Parse ('P'): prepare the unnamed statement from `sql` (with `$n`
 /// placeholders). Zero declared parameter types — the server infers them.
 pub fn build_parse(sql : String) -> Bytes {
+  build_parse_named("", sql)
+}
+
+///|
+/// Parse ('P') into a named prepared statement, so a later Bind can reuse it
+/// without re-parsing. An empty name is the unnamed statement.
+pub fn build_parse_named(name : String, sql : String) -> Bytes {
   let w = MsgWriter::new()
-  w.cstring("") // unnamed prepared statement
+  w.cstring(name)
   w.cstring(sql)
   w.i16(0) // no explicit parameter type OIDs
   frame(b'P', w.to_bytes())
@@ -152,9 +159,20 @@ pub fn build_parse(sql : String) -> Bytes {
 /// Bind ('B'): bind `params` (all text format) to the unnamed statement,
 /// producing the unnamed portal, and request all result columns in text format.
 pub fn build_bind(params : Array[Value]) -> Bytes {
+  build_bind_named("", "", params)
+}
+
+///|
+/// Bind ('B') `params` to a named (or unnamed) prepared statement, producing a
+/// named (or unnamed) portal. All parameters and result columns use text format.
+pub fn build_bind_named(
+  portal : String,
+  statement : String,
+  params : Array[Value],
+) -> Bytes {
   let w = MsgWriter::new()
-  w.cstring("") // unnamed portal
-  w.cstring("") // unnamed prepared statement
+  w.cstring(portal)
+  w.cstring(statement)
   w.i16(0) // zero parameter format codes ⇒ all text
   w.i16(params.length())
   for p in params {
@@ -168,6 +186,19 @@ pub fn build_bind(params : Array[Value]) -> Bytes {
   }
   w.i16(0) // zero result format codes ⇒ all text
   frame(b'B', w.to_bytes())
+}
+
+///|
+/// CancelRequest: Int32 length `16`, Int32 request code `80877102`, then the
+/// backend process id and secret key from `BackendKeyData`. Sent on a *new*
+/// connection to ask the server to cancel the query running on the old one.
+pub fn build_cancel_request(pid : Int32, secret : Int32) -> Bytes {
+  let w = MsgWriter::new()
+  w.i32(16)
+  w.i32(80877102)
+  w.i32(pid)
+  w.i32(secret)
+  w.to_bytes()
 }
 
 ///|
