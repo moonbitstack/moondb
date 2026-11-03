@@ -11,14 +11,20 @@ async test "integration: MySQL over TLS negotiates and round-trips" {
   let roots = @x509.Roots::new() catch { _ => abort("empty roots") }
   let client = @tls.Client::new(
     roots,
+    versions=[@tls.Tls12],
     verify=@tls.Verify::Custom(fn(_certs, _host) { () }),
   )
+  let host = env_or("MYSQL_HOST", "127.0.0.1")
+  let port = match @env.get_env_var("MYSQL_PORT") {
+    Some(p) => @string.parse_int(p[:]) catch { _ => 3306 }
+    None => 3306
+  }
   let conn = @client.MysqlConn::connect(
-    "127.0.0.1",
-    3306,
-    "root",
-    "root",
-    "test",
+    host,
+    port,
+    env_or("MYSQL_USER", "root"),
+    env_or("MYSQL_PASSWORD", "root"),
+    env_or("MYSQL_DB", "test"),
     tls=client,
   )
   let rows = conn.query("SELECT 1", [])
