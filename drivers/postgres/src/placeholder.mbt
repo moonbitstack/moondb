@@ -125,9 +125,20 @@ fn scan_placeholders(sql : String) -> (String, Int32) {
         }
       }
     } else if c == '?' {
-      if i + 1 < n && sql[i + 1] == '?' {
+      if i + 1 < n && (sql[i + 1] == '|' || sql[i + 1] == '&') {
+        // `?|` and `?&` are JSONB's "any"/"all key exists" operators. They are two
+        // characters with no space between, so they are never a placeholder.
+        sb.write_char('?')
+        sb.write_char(sql[i + 1].unsafe_to_char())
+        i += 2
+      } else if i + 1 < n && sql[i + 1] == '?' {
         sb.write_char('?')
         i += 2
+      } else if is_jsonb_exists_operator(sql, i) {
+        // A bare `?` between two expressions is JSONB's "key exists" operator;
+        // rewriting it to `$n` produces `data $1 'key'` and a syntax error.
+        sb.write_char('?')
+        i += 1
       } else {
         param += 1
         sb.write_char('$')
@@ -151,6 +162,110 @@ pub fn count_placeholders(sql : String) -> Int32 {
   // may have been copied through from a string literal or a comment, which made
   // this report a parameter count no statement ever had.
   scan_placeholders(sql).1
+}
+
+///|
+/// Keywords after which a `?` introduces a value binding, not the JSONB `?`
+/// operator. Without this, `SELECT ? FROM t` would read the `?` as sitting between
+/// two operands (the trailing `T` of `SELECT` and the `F` of `FROM`) and leave it
+/// untranslated.
+let placeholder_intro_keywords : Array[String] = [
+  "select", "where", "and", "or", "not", "in", "values", "set", "returning", "on",
+  "using", "by", "limit", "offset", "between", "like", "ilike", "is", "then", "else",
+  "when", "case", "having", "as", "distinct", "from", "into", "update", "insert",
+  "delete", "all", "any", "some", "exists", "with", "over", "partition", "cast",
+  "filter", "group", "order", "union", "except", "intersect", "lateral", "conflict",
+  "do", "nothing", "null", "true", "false",
+]
+
+///|
+/// The last index at or before `from` whose character is not ASCII whitespace,
+/// or `-1` when the run is all whitespace / past the start.
+fn prev_significant(sql : String, from : Int32) -> Int32 {
+  let mut i = from
+  while i >= 0 {
+    let c = sql[i].to_int()
+    if c != 32 && c != 9 && c != 10 && c != 13 {
+      return i
+    }
+    i -= 1
+  }
+  -1
+}
+
+///|
+/// The first index at or after `from` whose character is not ASCII whitespace,
+/// or `-1` when the rest is all whitespace / past the end.
+fn next_significant(sql : String, from : Int32) -> Int32 {
+  let n = sql.length()
+  let mut i = from
+  while i < n {
+    let c = sql[i].to_int()
+    if c != 32 && c != 9 && c != 10 && c != 13 {
+      return i
+    }
+    i += 1
+  }
+  -1
+}
+
+///|
+/// Whether `ch` can appear in an unquoted SQL identifier or number.
+fn is_identifier_char(ch : UInt16) -> Bool {
+  let c = ch.to_int()
+  (c >= 65 && c <= 90) ||
+  (c >= 97 && c <= 122) ||
+  (c >= 48 && c <= 57) ||
+  c == 95 ||
+  c == 36
+}
+
+///|
+/// Whether `ch` can open the right operand of the JSONB `?` operator: a string
+/// or identifier, a nested expression, an array constructor, or a number.
+fn starts_operand(ch : UInt16) -> Bool {
+  let c = ch.to_int()
+  // A `?` here is the *next* placeholder (`data ? ?` binds the key), not the
+  // two-character escape — `??` is consumed before this predicate is reached.
+  c == 39 || c == 34 || c == 40 || c == 91 || c == 63 || is_identifier_char(ch)
+}
+
+///|
+/// Whether `ch` can end the left operand of the JSONB `?` operator: an
+/// identifier character, a closing paren/bracket, or a closing quote.
+fn ends_expression(ch : UInt16) -> Bool {
+  let c = ch.to_int()
+  is_identifier_char(ch) || c == 41 || c == 93 || c == 39 || c == 34
+}
+
+///|
+/// The identifier ending at `end` (inclusive), lowercased for keyword lookup.
+fn word_ending_at(sql : String, end : Int32) -> String {
+  let mut start = end
+  while start > 0 && is_identifier_char(sql[start - 1]) {
+    start -= 1
+  }
+  sql[start:end + 1].to_owned().to_lower()
+}
+
+///|
+/// Whether the bare `?` at `at` is PostgreSQL's JSONB "key exists" operator. It
+/// is one only when it sits *between* two expressions: an expression-ending token
+/// on the left and an operand-starting token on the right, with the left token not
+/// being a keyword that precedes a value. Every other bare `?` is a placeholder.
+fn is_jsonb_exists_operator(sql : String, at : Int32) -> Bool {
+  let next = next_significant(sql, at + 1)
+  if next < 0 || !starts_operand(sql[next]) {
+    return false
+  }
+  let prev = prev_significant(sql, at - 1)
+  if prev < 0 || !ends_expression(sql[prev]) {
+    return false
+  }
+  if is_identifier_char(sql[prev]) {
+    return !placeholder_intro_keywords.contains(word_ending_at(sql, prev))
+  }
+  true
 }
 
 ///|

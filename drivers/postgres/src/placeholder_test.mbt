@@ -85,6 +85,82 @@ test "a backslash-escaped quote does not end the literal" {
 }
 
 ///|
+/// JSONB's `?` "key exists" operator sits between two expressions. Rewriting it as
+/// `$n` turned `data ? 'key'` into `data $1 'key'`, a syntax error at the server.
+test "jsonb ? operator is not renumbered" {
+  assert_eq(
+    @moonpostgres.translate_placeholders(
+      "SELECT data ? 'k' FROM t WHERE id = ?",
+    ),
+    "SELECT data ? 'k' FROM t WHERE id = $1",
+  )
+  assert_eq(
+    @moonpostgres.count_placeholders("SELECT data ? 'k' FROM t WHERE id = ?"),
+    1,
+  )
+  // after a closing paren or a quoted literal, `?` is still the operator
+  assert_eq(
+    @moonpostgres.translate_placeholders(
+      "SELECT (payload) ? 'k' FROM t WHERE id = ?",
+    ),
+    "SELECT (payload) ? 'k' FROM t WHERE id = $1",
+  )
+  assert_eq(
+    @moonpostgres.translate_placeholders(
+      "SELECT a->'k' ? 'v' FROM t WHERE id = ?",
+    ),
+    "SELECT a->'k' ? 'v' FROM t WHERE id = $1",
+  )
+}
+
+///|
+/// `?|` and `?&` are two-character JSONB operators, never placeholders.
+test "jsonb ?| and ?& are not renumbered" {
+  assert_eq(
+    @moonpostgres.translate_placeholders(
+      "SELECT data ?| array['a','b'] FROM t WHERE id = ?",
+    ),
+    "SELECT data ?| array['a','b'] FROM t WHERE id = $1",
+  )
+  assert_eq(
+    @moonpostgres.translate_placeholders(
+      "SELECT data ?& array['a'] FROM t WHERE id = ?",
+    ),
+    "SELECT data ?& array['a'] FROM t WHERE id = $1",
+  )
+}
+
+///|
+/// The operator heuristic must not swallow a real placeholder that follows a
+/// keyword rather than an expression.
+test "a placeholder after a keyword is still a placeholder" {
+  assert_eq(
+    @moonpostgres.translate_placeholders("SELECT ? FROM t"),
+    "SELECT $1 FROM t",
+  )
+  assert_eq(@moonpostgres.translate_placeholders("VALUES (?)"), "VALUES ($1)")
+  assert_eq(
+    @moonpostgres.translate_placeholders("SELECT a FROM t LIMIT ?"),
+    "SELECT a FROM t LIMIT $1",
+  )
+  assert_eq(
+    @moonpostgres.translate_placeholders("UPDATE t SET a = ? WHERE b = ?"),
+    "UPDATE t SET a = $1 WHERE b = $2",
+  )
+}
+
+///|
+/// `data ? ?` is the operator followed by a bound key: the first `?` is the
+/// operator, the second is the placeholder.
+test "jsonb operator followed by a bound key" {
+  assert_eq(
+    @moonpostgres.translate_placeholders("SELECT data ? ? FROM t"),
+    "SELECT data ? $1 FROM t",
+  )
+  assert_eq(@moonpostgres.count_placeholders("SELECT data ? ? FROM t"), 1)
+}
+
+///|
 /// The parameter count comes from the scan, not from looking for `$n` in the output
 /// — an output `$9` may have been copied through from a literal or a comment.
 test "count_placeholders ignores dollar-numbers inside literals and comments" {
