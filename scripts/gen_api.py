@@ -164,19 +164,61 @@ def _drop_foreign(text):
     return re.sub(r"\s+([,.;])", r"\1", out)
 
 
+def _flush_para(lines, chunks):
+    """Join one paragraph's lines, drop foreign references, emit it with code."""
+    para = " ".join(x.strip() for x in lines if x.strip())
+    if not para:
+        return
+    # The foreign-reference filter rewrites prose sentence by sentence, which
+    # would flatten a code block, so it runs per paragraph — never on the whole
+    # doc, which may contain one.
+    para = _drop_foreign(para)
+    if not para:
+        return
+    para = _esc(para)
+    para = re.sub(r"`([^`]+)`", r'<code class="inline">\1</code>', para)
+    chunks.append(f"<p>{para}</p>")
+
+
 def render_doc(text):
-    """`///` prose -> paragraphs with inline code."""
-    text = _drop_foreign(text or "")
+    """`///` prose -> paragraphs with inline code, plus fenced code blocks.
+
+    A fenced block is passed through as preformatted text: the info string is
+    dropped, the body escaped, and inline-code markup is not applied inside it —
+    a `$1` in an example is a placeholder, not code to style.
+    """
     if not text:
         return ""
     chunks = []
-    for para in re.split(r"\n\s*\n", text):
-        para = " ".join(x.strip() for x in para.splitlines() if x.strip())
-        if not para:
+    para = []
+    code = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if code is not None:
+            if stripped.startswith("```"):
+                chunks.append(
+                    "<pre><code>"
+                    + _esc("\n".join(code))
+                    + "</code></pre>"
+                )
+                code = None
+            else:
+                code.append(line.rstrip())
             continue
-        para = _esc(para)
-        para = re.sub(r"`([^`]+)`", r'<code class="inline">\1</code>', para)
-        chunks.append(f"<p>{para}</p>")
+        if stripped.startswith("```"):
+            _flush_para(para, chunks)
+            para = []
+            code = []
+            continue
+        if not stripped:
+            _flush_para(para, chunks)
+            para = []
+            continue
+        para.append(stripped)
+    if code:
+        # An unterminated fence still renders: better the example than nothing.
+        chunks.append("<pre><code>" + _esc("\n".join(code)) + "</code></pre>")
+    _flush_para(para, chunks)
     return "".join(chunks)
 
 

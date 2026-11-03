@@ -88,6 +88,10 @@
 .entry { padding: 14px 0 18px; border-top: 1px solid var(--hair); }
 .entry:last-child { border-bottom: 1px solid var(--hair); }
 .entry .signature { margin: 0; border: 0; background: transparent; padding: 0; font-size: 12.5px; line-height: 1.6; overflow-x: auto; }
+
+/* ---- an example fenced inside a doc comment: boxed, scrolls on its own ---- */
+.doc pre { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; border: 1px solid var(--hair); border-left: 3px solid var(--ink-soft); background: var(--paper-2); padding: var(--s3); margin: var(--s3) 0 0; overflow: auto; white-space: pre; color: var(--ink); }
+.doc pre code { font: inherit; background: none; padding: 0; }
 .entry .doc { color: var(--ink-soft); font-size: 15px; line-height: 1.65; max-width: 82ch; margin-top: 6px; }
 .entry .doc p { margin: 0 0 8px; }
 .entry .doc p:last-child { margin-bottom: 0; }
