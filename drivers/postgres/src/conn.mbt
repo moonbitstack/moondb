@@ -250,7 +250,7 @@ async fn PgConn::run_sasl(
     client_first_bare,
     server_first,
     gs2_header=gs2,
-    cbind=channel,
+    cbind?=channel,
   )
   self.write_all(build_sasl_response(client_final))
   let server_final = self.read_sasl_message(12)

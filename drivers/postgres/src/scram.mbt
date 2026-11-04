@@ -59,7 +59,7 @@ pub fn scram_client_final(
   client_first_bare : String,
   server_first : String,
   gs2_header~ : String = "n,,",
-  cbind~ : Bytes? = None,
+  cbind? : Bytes,
 ) -> (String, Bytes) raise DbError {
   let mut nonce = ""
   let mut salt_b64 = ""

@@ -97,7 +97,7 @@ pub fn pg_md5_password(String, String, Bytes) -> String
 
 pub fn saslprep(String) -> String
 
-pub fn scram_client_final(Bytes, String, String, gs2_header? : String, cbind? : Bytes?) -> (String, Bytes) raise @moondb.DbError
+pub fn scram_client_final(Bytes, String, String, gs2_header? : String, cbind? : Bytes) -> (String, Bytes) raise @moondb.DbError
 
 pub fn scram_client_proof(Bytes, Bytes) -> Bytes
 

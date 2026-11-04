@@ -28,7 +28,7 @@ test "channel binding puts the gs2 header and the certificate hash in c=" {
     "n=u,r=abcdef",
     "r=abcdefXYZ,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096",
     gs2_header="p=tls-server-end-point,,",
-    cbind=Some(cbind),
+    cbind~,
   )
   let input = Buffer()
   input.write_bytes(@utf8.encode("p=tls-server-end-point,,")[:])
