@@ -176,7 +176,10 @@ def _flush_para(lines, chunks):
     if not para:
         return
     para = _esc(para)
+    # Links to a declaration are written [`Name`] in a doc comment, and a stress as *word*.
+    para = re.sub(r"\[(`[^`]+`)\]", r"\1", para)
     para = re.sub(r"`([^`]+)`", r'<code class="inline">\1</code>', para)
+    para = re.sub(r"(?<![\w*])\*([^*\s][^*]*)\*(?![\w*])", r"<em>\1</em>", para)
     chunks.append(f"<p>{para}</p>")
 
 
