@@ -68,6 +68,12 @@ extern "c" fn ffi_col_name(st : Int64, i : Int32) -> Bytes = "orm_col_name"
 extern "c" fn ffi_finalize(st : Int64) -> Int32 = "orm_finalize"
 
 ///|
+extern "c" fn ffi_reset(st : Int64) -> Int32 = "orm_reset"
+
+///|
+extern "c" fn ffi_clear_bindings(st : Int64) -> Int32 = "orm_clear_bindings"
+
+///|
 extern "c" fn ffi_changes(db : Int64) -> Int32 = "orm_changes"
 
 ///|

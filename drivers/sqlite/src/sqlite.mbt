@@ -260,6 +260,19 @@ pub impl @moondb.Driver for SqliteDriver with fn close(self) {
 }
 
 ///|
+/// This driver speaks SQLite: positional `?` placeholders, no server-side cursors,
+/// `RETURNING` since 3.35, savepoints.
+pub impl @moondb.Driver for SqliteDriver with fn dialect(_self) {
+  @moondb.Dialect::Sqlite
+}
+
+///|
+/// Compile the statement once and hand back a reusable handle.
+pub impl @moondb.Driver for SqliteDriver with fn prepare(self, sql) {
+  self.prepare_stmt(sql)
+}
+
+///|
 pub extend SqliteDriver with @moondb.Driver::{
   execute,
   begin,
@@ -269,6 +282,9 @@ pub extend SqliteDriver with @moondb.Driver::{
   commit,
   query,
   rollback,
+  dialect,
+  prepare,
+  capabilities,
 }
 
 ///|

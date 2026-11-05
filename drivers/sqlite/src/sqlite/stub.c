@@ -63,6 +63,9 @@ moonbit_bytes_t orm_col_name(int64_t st, int32_t i) {
   return mb_bytes(n, n ? (int32_t)strlen(n) : 0);
 }
 int32_t orm_finalize(int64_t st) { return sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); }
+int32_t orm_reset(int64_t st) { return sqlite3_reset((sqlite3_stmt*)(intptr_t)st); }
+int32_t orm_clear_bindings(int64_t st) { return sqlite3_clear_bindings((sqlite3_stmt*)(intptr_t)st); }
+int32_t orm_bind_parameter_count(int64_t st) { return sqlite3_bind_parameter_count((sqlite3_stmt*)(intptr_t)st); }
 int32_t orm_changes(int64_t db) { return sqlite3_changes((sqlite3*)(intptr_t)db); }
 int64_t orm_last_id(int64_t db) { return sqlite3_last_insert_rowid((sqlite3*)(intptr_t)db); }
 /* close_v2 defers the free until any still-live prepared statement (e.g. an
