@@ -619,7 +619,7 @@ async fn MysqlConn::prepared_query(
   params : Array[@moondb.Value],
 ) -> Array[@moondb.Row] {
   let stmt = self.compile(sql)
-  errdefer self.stmt_close(stmt.id)
+  errdefer @async.protect_from_cancel(() => self.stmt_close(stmt.id))
   let rows = self.read_prepared_rows(stmt.id, params)
   self.stmt_close(stmt.id)
   rows
@@ -632,7 +632,7 @@ async fn MysqlConn::prepared_execute(
   params : Array[@moondb.Value],
 ) -> @moondb.ExecResult {
   let stmt = self.compile(sql)
-  errdefer self.stmt_close(stmt.id)
+  errdefer @async.protect_from_cancel(() => self.stmt_close(stmt.id))
   self.write_packet(0, @moonmysql.build_stmt_execute(stmt.id, params))
   let first = self.read_packet()
   if @moonmysql.is_err_packet(first) {

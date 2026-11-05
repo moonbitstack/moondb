@@ -304,15 +304,31 @@ async fn PgConn::read_results(self : PgConn) -> QueryOutcome raise DbError {
       // rest of this result is still on the socket, and leaving it there means the
       // next statement reads it.
       84 => {
-        errdefer self.drain_until_ready()
-        let (names, oids) = parse_row_description(payload)
-        col_names = names
-        col_oids = oids
+        let parsed = Ok(parse_row_description(payload)) catch { e => Err(e) }
+        match parsed {
+          Ok(info) => {
+            let (names, oids) = info
+            col_names = names
+            col_oids = oids
+          }
+          Err(e) => {
+            self.drain_until_ready()
+            raise e
+          }
+        }
       }
       // 'D' DataRow
       68 => {
-        errdefer self.drain_until_ready()
-        rows.push(parse_data_row(payload, col_names, col_oids))
+        let parsed = Ok(parse_data_row(payload, col_names, col_oids)) catch {
+          e => Err(e)
+        }
+        match parsed {
+          Ok(row) => rows.push(row)
+          Err(e) => {
+            self.drain_until_ready()
+            raise e
+          }
+        }
       }
       // 'C' CommandComplete
       67 => {
@@ -549,21 +565,33 @@ pub async fn PgRowStream::next(self : PgRowStream) -> Row? raise DbError {
       // socket with the stream still marked live, which bricks the connection —
       // drain and close the stream before raising, as the error path does.
       84 => {
-        errdefer {
-          self.conn.drain_until_ready()
-          self.finish()
+        let parsed = Ok(parse_row_description(payload)) catch { e => Err(e) }
+        match parsed {
+          Ok(info) => {
+            let (names, oids) = info
+            self.col_names = names
+            self.col_oids = oids
+          }
+          Err(e) => {
+            self.conn.drain_until_ready()
+            self.finish()
+            raise e
+          }
         }
-        let (names, oids) = parse_row_description(payload)
-        self.col_names = names
-        self.col_oids = oids
       }
       // 'D' DataRow
       68 => {
-        errdefer {
-          self.conn.drain_until_ready()
-          self.finish()
+        let parsed = Ok(parse_data_row(payload, self.col_names, self.col_oids)) catch {
+          e => Err(e)
         }
-        return Some(parse_data_row(payload, self.col_names, self.col_oids))
+        match parsed {
+          Ok(row) => return Some(row)
+          Err(e) => {
+            self.conn.drain_until_ready()
+            self.finish()
+            raise e
+          }
+        }
       }
       // 'E' ErrorResponse
       69 => {
