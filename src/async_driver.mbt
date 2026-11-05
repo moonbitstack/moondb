@@ -59,8 +59,9 @@ pub(open) trait AsyncDriver {
   /// driver whose server can prepare once overrides it with a real server-side
   /// handle.
   async fn prepare(Self, String) -> &AsyncStmt raise DbError = _
-  /// The SQL dialect this driver speaks. See [`Driver::dialect`]; the same default
-  /// and the same obligation to override for a numbered backend apply.
+  /// The SQL dialect this driver speaks. See [`Driver::dialect`]: the same default,
+  /// and the same two consequences — `?` reaching a numbered backend, and a
+  /// capability report that understates it — for a driver that does not override.
   fn dialect(Self) -> Dialect = _
   /// What this backend can do beyond the base contract.
   fn capabilities(Self) -> Capabilities = _

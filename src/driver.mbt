@@ -67,10 +67,15 @@ pub(open) trait Driver {
   fn prepare(Self, String) -> &Stmt raise DbError = _
   /// The SQL dialect this driver speaks. A query layer reads it once to choose the
   /// placeholder spelling and the SQL it emits, instead of being told the backend
-  /// a second time. A driver that numbers its parameters (PostgreSQL) must
-  /// override the default; the default is the positional `?` spelling, so an
-  /// undeclared numbered backend fails loudly at the server rather than silently
-  /// binding the wrong value.
+  /// a second time.
+  ///
+  /// The default is SQLite's positional `?`, and it is a default rather than a
+  /// requirement so an existing or out-of-tree driver keeps compiling. Two
+  /// consequences follow, and a driver that numbers its parameters must override
+  /// this to be rid of both: emitted SQL carries `?` and the server rejects it
+  /// (loud, at the first statement), and [`capabilities`](#capabilities) reports
+  /// the SQLite preset, which understates what the backend can do (quiet, and a
+  /// query layer will lower its plan instead of using `COPY` or a server cursor).
   fn dialect(Self) -> Dialect = _
   /// What this backend can do beyond the base contract, derived from its dialect.
   fn capabilities(Self) -> Capabilities = _
