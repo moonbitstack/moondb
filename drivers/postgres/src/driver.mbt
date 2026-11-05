@@ -116,3 +116,18 @@ pub impl @moondb.AsyncCursor for PgRowStream with fn close(self : PgRowStream) -
     _ => ()
   }
 }
+
+///|
+/// This connection speaks PostgreSQL.
+pub impl @moondb.AsyncDriver for PgConn with fn dialect(_self) {
+  @moondb.Dialect::Postgres
+}
+
+///|
+/// Prepare the statement on this connection, reusing the statement cache.
+pub impl @moondb.AsyncDriver for PgConn with fn prepare(self, sql) {
+  self.prepare_stmt(sql)
+}
+
+///|
+pub extend PgConn with @moondb.AsyncDriver::{dialect, capabilities, prepare}

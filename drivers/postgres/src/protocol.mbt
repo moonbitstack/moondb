@@ -156,6 +156,16 @@ pub fn build_parse_named(name : String, sql : String) -> Bytes {
 }
 
 ///|
+/// Close ('C') for a named prepared statement: the server frees it and answers
+/// `CloseComplete`. A `Sync` follows so the message reaches a ready state on its own.
+pub fn build_close_statement(name : String) -> Bytes {
+  let w = MsgWriter::new()
+  w.byte(b'S')
+  w.cstring(name)
+  concat_bytes(frame(b'C', w.to_bytes()), build_sync())
+}
+
+///|
 /// Bind ('B'): bind `params` (all text format) to the unnamed statement,
 /// producing the unnamed portal, and request all result columns in text format.
 pub fn build_bind(params : Array[Value]) -> Bytes {

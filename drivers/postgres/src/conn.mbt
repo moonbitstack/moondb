@@ -906,36 +906,75 @@ fn escape_sql_literal(s : String) -> String {
 }
 
 ///|
-/// Run a `COPY … TO STDOUT` statement and return the bytes the server streams.
-pub async fn PgConn::copy_out(
+/// A `COPY … TO STDOUT` in progress: the server sends the data in pieces and
+/// [`read_chunk`](#read_chunk) hands them over one at a time, so a table or a query
+/// result larger than memory can be written straight to a file or a socket.
+///
+/// The stream owns the connection's single-response pipeline until it ends: read it
+/// to `None` (or [`cancel`](#cancel) it) before the next statement. The chunks are
+/// the server's own framing — COPY text rows are newline-terminated, CSV rows
+/// likewise, binary rows are length-prefixed — so a caller writes them out verbatim.
+pub struct PgCopyOut {
+  conn : PgConn
+  mut done : Bool
+  mut rows : Int64
+}
+
+///|
+/// Start a `COPY … TO STDOUT` and hand back the stream. Nothing is buffered: the
+/// first chunk is read by the first `read_chunk`.
+pub async fn PgConn::copy_out_stream(
   self : PgConn,
   sql : String,
-) -> Bytes raise DbError {
+) -> PgCopyOut raise DbError {
   if self.closed {
     raise @moondb.Closed
   }
   if self.streaming {
     raise @moondb.QueryError(
-      "a query stream is still open on this connection; drain it or call close()",
+      "a stream is still open on this connection; drain it or call close() first",
     )
   }
   self.send_statement(sql, [])
-  let out = Buffer()
+  self.streaming = true
+  { conn: self, done: false, rows: 0, }
+}
+
+///|
+/// The next chunk of copied data, or `None` once the server has finished. The command
+/// tag's row count is reported by [`rows`](#rows) after the stream ends.
+pub async fn PgCopyOut::read_chunk(self : PgCopyOut) -> Bytes? raise DbError {
+  if self.done {
+    return None
+  }
   for ;; {
-    let (tag, payload) = self.read_message()
+    let (tag, payload) = self.conn.read_message()
     match tag {
-      // 'd' CopyData
-      100 => out.write_bytes(payload[:])
+      // 'd' CopyData — one piece of the stream, returned as-is.
+      100 => return Some(payload)
+      // 'c' CopyDone
+      99 => ()
+      // 'C' CommandComplete
+      67 => {
+        let r = ByteReader::new(payload)
+        self.rows = command_tag_rows(r.cstring())
+      }
       // 'Z' ReadyForQuery
-      90 => return out.to_bytes()
+      90 => {
+        self.done = true
+        self.conn.streaming = false
+        return None
+      }
       69 => {
         let detail = parse_error_detail(payload)
-        self.drain_until_ready()
+        self.done = true
+        self.conn.streaming = false
+        self.conn.drain_until_ready()
         raise @moondb.Server(detail)
       }
       83 => {
         let r = ByteReader::new(payload)
-        self.params.set(r.cstring(), r.cstring())
+        self.conn.params.set(r.cstring(), r.cstring())
       }
       _ => ()
     }
@@ -943,67 +982,184 @@ pub async fn PgConn::copy_out(
 }
 
 ///|
-/// Run a `COPY … FROM STDIN` statement, streaming `data` to the server, and
-/// report the command tag's affected-row count.
-pub async fn PgConn::copy_in(
+/// How many rows the finished `COPY` reported, or `0` while it is still running.
+pub fn PgCopyOut::rows(self : PgCopyOut) -> Int64 {
+  self.rows
+}
+
+///|
+/// Abandon the stream: finish reading the server's response so the connection can run
+/// the next statement. Everything already read stays read.
+pub async fn PgCopyOut::cancel(self : PgCopyOut) -> Unit raise DbError {
+  if !self.done {
+    self.conn.drain_until_ready()
+    self.done = true
+    self.conn.streaming = false
+  }
+}
+
+///|
+/// Run a `COPY … TO STDOUT` and return everything it produced. The convenience wrapper
+/// over [`copy_out_stream`](#copy_out_stream) for a result that does fit in memory.
+pub async fn PgConn::copy_out(
   self : PgConn,
   sql : String,
-  data : Bytes,
-) -> @moondb.ExecResult raise DbError {
+) -> Bytes raise DbError {
+  let stream = self.copy_out_stream(sql)
+  let out = Buffer()
+  for ;; {
+    match stream.read_chunk() {
+      Some(chunk) => out.write_bytes(chunk[:])
+      None => break
+    }
+  }
+  out.to_bytes()
+}
+
+///|
+/// A `COPY … FROM STDIN` in progress: [`write_chunk`](#write_chunk) pushes pieces as
+/// they are produced and [`finish`](#finish) closes the stream and reports what the
+/// server did with it.
+///
+/// The stream owns the connection until `finish` (or [`fail`](#fail)); writing after
+/// either is a `QueryError`. Chunks are passed through as COPY data messages, so a
+/// caller can stream a file of any size without materialising it.
+pub struct PgCopyIn {
+  conn : PgConn
+  mut done : Bool
+  mut failed : Bool
+}
+
+///|
+/// Start a `COPY … FROM STDIN`. Returns once the server has signalled it is ready for
+/// data.
+pub async fn PgConn::copy_in_stream(
+  self : PgConn,
+  sql : String,
+) -> PgCopyIn raise DbError {
   if self.closed {
     raise @moondb.Closed
   }
   if self.streaming {
     raise @moondb.QueryError(
-      "a query stream is still open on this connection; drain it or call close()",
+      "a stream is still open on this connection; drain it or call close() first",
     )
   }
   self.send_statement(sql, [])
+  let (tag, payload) = self.read_message()
+  match tag {
+    // 'G' CopyInResponse — the server is ready for CopyData.
+    71 => ()
+    69 => {
+      let detail = parse_error_detail(payload)
+      self.drain_until_ready()
+      raise @moondb.Server(detail)
+    }
+    _ =>
+      raise @moondb.QueryError(
+        "expected CopyInResponse from the server, got message type " +
+        tag.to_string(),
+      )
+  }
+  self.streaming = true
+  { conn: self, done: false, failed: false, }
+}
+
+///|
+/// Send one piece of COPY data. The chunk is framed here, so the caller only supplies
+/// the payload — rows in COPY's own format.
+pub async fn PgCopyIn::write_chunk(
+  self : PgCopyIn,
+  chunk : Bytes,
+) -> Unit raise DbError {
+  self.ensure_open()
+  self.conn.write_all(build_copy_data(chunk))
+}
+
+///|
+/// Close the stream (`CopyDone`) and read the server's verdict, reporting the command
+/// tag's affected-row count.
+pub async fn PgCopyIn::finish(self : PgCopyIn) -> ExecResult raise DbError {
+  self.ensure_open()
+  self.done = true
+  self.conn.write_all(build_copy_done())
   let mut command_tag = ""
-  let mut sent = false
   for ;; {
-    let (tag, payload) = self.read_message()
+    let (tag, payload) = self.conn.read_message()
     match tag {
-      // 'G' CopyInResponse — now send the data, in chunks, then CopyDone.
-      71 =>
-        if !sent {
-          sent = true
-          let chunk = 65536
-          let mut off = 0
-          while off < data.length() {
-            let end = if off + chunk < data.length() {
-              off + chunk
-            } else {
-              data.length()
-            }
-            self.write_all(build_copy_data(data[off:end].to_owned()))
-            off = end
-          }
-          self.write_all(build_copy_done())
-        }
       // 'C' CommandComplete
       67 => {
         let r = ByteReader::new(payload)
         command_tag = r.cstring()
       }
-      // 'Z' ReadyForQuery
-      90 =>
+      90 => {
+        self.conn.streaming = false
         return @moondb.ExecResult::{
           rows_affected: command_tag_rows(command_tag),
           last_insert_id: 0,
         }
+      }
       69 => {
         let detail = parse_error_detail(payload)
-        self.drain_until_ready()
+        self.conn.streaming = false
+        self.conn.drain_until_ready()
         raise @moondb.Server(detail)
       }
       83 => {
         let r = ByteReader::new(payload)
-        self.params.set(r.cstring(), r.cstring())
+        self.conn.params.set(r.cstring(), r.cstring())
       }
       _ => ()
     }
   }
+}
+
+///|
+/// Abort the load (`CopyFail` with `reason`) and read the server's error. The
+/// connection stays usable; the rows already sent are rolled back with the statement.
+pub async fn PgCopyIn::fail(
+  self : PgCopyIn,
+  reason : String,
+) -> Unit raise DbError {
+  if self.done {
+    return
+  }
+  self.done = true
+  self.failed = true
+  self.conn.write_all(build_copy_fail(reason))
+  self.conn.drain_until_ready()
+  self.conn.streaming = false
+}
+
+///|
+fn PgCopyIn::ensure_open(self : PgCopyIn) -> Unit raise DbError {
+  if self.done || self.failed {
+    raise @moondb.QueryError("the COPY stream is already closed")
+  }
+}
+
+///|
+/// Run a `COPY … FROM STDIN`, streaming `data` to the server in bounded chunks, and
+/// report the command tag's affected-row count. The convenience wrapper over
+/// [`copy_in_stream`](#copy_in_stream) for a payload that is already in memory.
+pub async fn PgConn::copy_in(
+  self : PgConn,
+  sql : String,
+  data : Bytes,
+) -> @moondb.ExecResult raise DbError {
+  let sink = self.copy_in_stream(sql)
+  let chunk = 65536
+  let mut off = 0
+  while off < data.length() {
+    let end = if off + chunk < data.length() {
+      off + chunk
+    } else {
+      data.length()
+    }
+    sink.write_chunk(data[off:end].to_owned())
+    off = end
+  }
+  sink.finish()
 }
 
 ///|

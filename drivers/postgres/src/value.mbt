@@ -100,10 +100,10 @@ pub fn encode_param(v : Value) -> Bytes? {
 ///|
 /// Decode a text-format result cell (`raw`, already UTF-8) tagged with its
 /// column `oid` into a [`Value`]. `is_null` marks a wire `NULL` (length `-1`),
-/// which decodes to `Null` regardless of type. Numeric and boolean OIDs decode
-/// to their typed cases; everything else — including `numeric`, dates, and
-/// unknown OIDs — rides back as `Text`, exactly the dialect-neutral contract
-/// moondb documents (temporal/`numeric` typing is a roadmap item).
+/// which decodes to `Null` regardless of type. Boolean, integer, floating-point,
+/// `numeric`, `uuid`, `json`/`jsonb` and the date/time OIDs decode to their typed
+/// cases; an OID the table does not know — an enum or a domain — rides back as
+/// `Text`, exactly the dialect-neutral contract moondb documents.
 pub fn decode_value(oid : Int32, is_null : Bool, raw : String) -> Value {
   if is_null {
     return @moondb.Null
