@@ -198,7 +198,10 @@ let q = @moondb.rewrite_named(
 assert_eq(q.sql, "SELECT * FROM hero WHERE id = $1 AND realm = $2")
 assert_eq(q.slots, ["id", "realm"])
 
-let m = @moondb.rewrite_named("SELECT * FROM hero WHERE id = :id", @moondb.Dialect::Mysql)
+let m = @moondb.rewrite_named(
+"SELECT * FROM hero WHERE id = :id",
+@moondb.Dialect::Mysql,
+)
 assert_eq(m.sql, "SELECT * FROM hero WHERE id = ?")
 }</code></pre></div></div>
 <div class="entry"><pre class="signature">pub(open) trait QueryExecutor {
@@ -209,7 +212,7 @@ assert_eq(m.sql, "SELECT * FROM hero WHERE id = ?")
   fn capabilities(Self) -&gt; Capabilities
 }</pre><div class="doc"><p>The part of a driver a query layer actually needs: run a statement, and ask what the backend is.</p><p><code class="inline">Driver</code> bundles three unrelated responsibilities — running SQL, owning a transaction, and owning a connection. A repository method, a query builder, a migration step all want the first and must not be able to <code class="inline">close</code> the connection out from under the caller that lent it to them. That is what the narrow view is for: <code class="inline">Driver::executor</code> hands out an <code class="inline">Executor</code>, and a function that takes <code class="inline">&amp;QueryExecutor</code> can run SQL and cannot end the session.</p><p>It also carries the two questions a dialect-sensitive layer asks before it emits SQL: <code class="inline">dialect</code>(#dialect) for the placeholder spelling and <code class="inline">capabilities</code>(#capabilities) for everything the backend can do beyond the base contract. A layer that must prepare statements takes the full <code class="inline">Driver</code> instead.</p><pre><code>test "a repository only needs to run SQL" {
 let db = @moondb.MockDriver::new()
-fn count(db : &amp;@moondb.QueryExecutor) -&gt; Int raise @moondb.DbError {
+fn count(db : &amp;@moondb.QueryExecutor) -&gt; Int32 raise @moondb.DbError {
 db.query("SELECT 1", []).length()
 }
 assert_eq(count(@moondb.Executor::new(db)), 0)
@@ -257,16 +260,17 @@ assert_eq(db.row_count(), 2)
 let db = @moondb.MockDriver::new()
 let tx = @moondb.Txn::new(db)
 tx.run(fn(tx) raise @moondb.DbError {
-tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [
-@moondb.Value::Int(1), @moondb.Value::Text("Nova"),
+tx
+.driver()
+.execute("INSERT INTO hero VALUES (?, ?)", [
+@moondb.Value::Int(1),
+@moondb.Value::Text("Nova"),
 ])
 |&gt; ignore
 // The inner level fails; only its own work is undone.
-(try {
-tx.run(fn(_tx) raise @moondb.DbError {
+(tx.run(fn(_tx) raise @moondb.DbError {
 raise @moondb.QueryError("inner failed")
-})
-} catch {
+}) catch {
 _ =&gt; ()
 })
 |&gt; ignore
