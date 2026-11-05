@@ -36,6 +36,17 @@ pub let client_secure_connection : Int32 = 0x00008000
 pub let client_ssl : Int32 = 0x00000800
 
 ///|
+/// `CLIENT_MULTI_STATEMENTS`: one `COM_QUERY` may carry several `;`-separated
+/// statements.
+pub let client_multi_statements : Int32 = 0x00010000
+
+///|
+/// `CLIENT_MULTI_RESULTS`: one statement may answer with more than one result set —
+/// what a stored procedure's `CALL` needs. Without it the server rejects a procedure
+/// that returns rows (`ER_SP_BADSELECT`).
+pub let client_multi_results : Int32 = 0x00020000
+
+///|
 /// The `CLIENT_PLUGIN_AUTH` capability flag of the connection handshake.
 pub let client_plugin_auth : Int32 = 0x00080000
 
@@ -220,14 +231,15 @@ pub fn parse_handshake(payload : Bytes) -> Handshake raise MysqlError {
 /// sends a native token, so a native-capable account authenticates and otherwise
 /// the server drives an AuthSwitchRequest the connection layer answers (native or
 /// caching_sha2) or rejects. Only a server that requires a non-native plugin *and*
-/// does not offer pluggable auth is rejected here. client_ed25519 remains on the
-/// README roadmap.
+/// does not offer pluggable auth is rejected here. client_ed25519 is answered by
+/// the connection layer when MariaDB switches to it.
 pub fn build_handshake_response(
   handshake : Handshake,
   user : String,
   password : Bytes,
   database : String,
   ssl~ : Bool = false,
+  charset~ : Int32 = 45,
 ) -> Bytes raise MysqlError {
   let (auth_response, advertised_plugin) = if handshake.auth_plugin ==
     "caching_sha2_password" {
@@ -250,14 +262,14 @@ pub fn build_handshake_response(
       "server requires auth plugin '" +
       handshake.auth_plugin +
       "' and does not offer pluggable auth; only mysql_native_password and " +
-      "caching_sha2_password are implemented (client_ed25519 is on the README roadmap)",
+      "caching_sha2_password are answered without a plugin switch",
     )
   }
   let caps = client_caps(database, ssl)
   let buf = Buffer()
   put_uint_le(buf, caps.to_int64(), 4)
   put_uint_le(buf, 0x01000000L, 4) // max packet size = 16 MiB
-  buf.write_byte(b'\x2d') // charset utf8mb4_general_ci (45), not utf8mb3
+  buf.write_byte(charset.to_byte()) // 45 = utf8mb4_general_ci, not utf8mb3
   for _ in 0..<23 {
     buf.write_byte(b'\x00')
   }
@@ -281,7 +293,9 @@ fn client_caps(database : String, ssl : Bool) -> Int32 {
     client_plugin_auth |
     client_long_password |
     client_transactions |
-    client_long_flag
+    client_long_flag |
+    client_multi_statements |
+    client_multi_results
   if database.length() > 0 {
     caps = caps | client_connect_with_db
   }
@@ -295,12 +309,12 @@ fn client_caps(database : String, ssl : Bool) -> Int32 {
 /// The 32-byte SSLRequest payload the client sends before starting TLS: the same
 /// capability word as the handshake response (with `CLIENT_SSL`), the max packet
 /// size, the charset, and 23 reserved zero bytes.
-pub fn build_ssl_request(database : String) -> Bytes {
+pub fn build_ssl_request(database : String, charset~ : Int32 = 45) -> Bytes {
   let caps = client_caps(database, true)
   let buf = Buffer()
   put_uint_le(buf, caps.to_int64(), 4)
   put_uint_le(buf, 0x01000000L, 4)
-  buf.write_byte(b'\x2d') // utf8mb4_general_ci
+  buf.write_byte(charset.to_byte()) // 45 = utf8mb4_general_ci
   for _ in 0..<23 {
     buf.write_byte(b'\x00')
   }

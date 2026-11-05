@@ -22,12 +22,17 @@ pub struct MysqlConn {
   mut quote_mode : @moonmysql.QuoteMode
 }
 pub async fn MysqlConn::begin(Self) -> Unit
+pub fn MysqlConn::capabilities(Self) -> @moondb.Capabilities
 pub fn MysqlConn::close(Self) -> Unit
 pub async fn MysqlConn::commit(Self) -> Unit
-pub async fn MysqlConn::connect(String, Int32, String, String, String, tls? : @tls.Client) -> Self
+pub async fn MysqlConn::connect(String, Int32, String, String, String, tls? : @tls.Client, charset? : Int32) -> Self
+pub fn MysqlConn::dialect(Self) -> @moondb.Dialect
 pub async fn MysqlConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult
 pub async fn MysqlConn::ping(Self) -> Bool
+pub async fn MysqlConn::prepare(Self, String) -> &@moondb.AsyncStmt raise @moondb.DbError
+pub async fn MysqlConn::prepare_stmt(Self, String) -> MysqlStmt
 pub async fn MysqlConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row]
+pub async fn MysqlConn::query_multi(Self, String, Array[@moondb.Value]) -> Array[Array[@moondb.Row]]
 pub async fn MysqlConn::query_stream(Self, String, Array[@moondb.Value]) -> MysqlRowStream
 pub async fn MysqlConn::rollback(Self) -> Unit
 pub fn MysqlConn::server_kind(Self) -> @moonmysql.ServerKind
@@ -42,11 +47,14 @@ pub struct MysqlDriver {
   tls : @tls.Client?
 }
 pub fn MysqlDriver::begin(Self) -> Unit raise @moondb.DbError
+pub fn MysqlDriver::capabilities(Self) -> @moondb.Capabilities
 pub fn MysqlDriver::close(Self) -> Unit
 pub fn MysqlDriver::commit(Self) -> Unit raise @moondb.DbError
+pub fn MysqlDriver::dialect(Self) -> @moondb.Dialect
 pub fn MysqlDriver::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
 pub fn MysqlDriver::new(user~ : String, password? : String, database? : String, host? : String, port? : Int32, tls? : @tls.Client) -> Self
 pub fn MysqlDriver::ping(Self) -> Bool
+pub fn MysqlDriver::prepare(Self, String) -> &@moondb.Stmt raise @moondb.DbError
 pub fn MysqlDriver::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
 pub fn MysqlDriver::query_stream(Self, String, Array[@moondb.Value]) -> &@moondb.Cursor raise @moondb.DbError
 pub fn MysqlDriver::rollback(Self) -> Unit raise @moondb.DbError
@@ -61,6 +69,15 @@ pub struct MysqlRowStream {
 pub async fn MysqlRowStream::close(Self) -> Unit
 pub async fn MysqlRowStream::next(Self) -> @moondb.Row?
 pub impl @moondb.AsyncCursor for MysqlRowStream
+
+pub struct MysqlStmt {
+  conn : MysqlConn
+  id : Int32
+  text : String
+  slots : Array[String]
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}
 
 // Type aliases
 

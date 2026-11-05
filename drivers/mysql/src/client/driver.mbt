@@ -170,6 +170,16 @@ pub impl @moondb.Driver for MysqlDriver with fn close(_self : MysqlDriver) -> Un
 }
 
 ///|
+
+///|
+/// This driver speaks MySQL: positional `?`, savepoints, unsigned 64-bit columns
+/// that keep their value above 2^63-1, more than one result set per statement, and
+/// no `RETURNING`.
+pub impl @moondb.Driver for MysqlDriver with fn dialect(_self) {
+  @moondb.Dialect::Mysql
+}
+
+///|
 pub extend MysqlDriver with @moondb.Driver::{
   execute,
   begin,
@@ -179,6 +189,9 @@ pub extend MysqlDriver with @moondb.Driver::{
   commit,
   query,
   rollback,
+  dialect,
+  capabilities,
+  prepare,
 }
 
 // The async seam. `MysqlConn` owns its socket for its whole lifetime — unlike
@@ -267,4 +280,27 @@ pub impl @moondb.AsyncCursor for MysqlRowStream with fn close(
 }
 
 ///|
-pub extend MysqlConn with @moondb.AsyncDriver::{ping}
+
+///|
+/// This connection speaks MySQL.
+pub impl @moondb.AsyncDriver for MysqlConn with fn dialect(_self) {
+  @moondb.Dialect::Mysql
+}
+
+///|
+/// Prepare the statement on this connection and hand back the handle. A prepared
+/// statement lives on the connection that owns the socket, which is why this is the
+/// async path and not the reconnect-per-call adapter's.
+pub impl @moondb.AsyncDriver for MysqlConn with fn prepare(self, sql) {
+  self.prepare_stmt(sql) catch {
+    e => raise to_db_error(e)
+  }
+}
+
+///|
+pub extend MysqlConn with @moondb.AsyncDriver::{
+  ping,
+  dialect,
+  capabilities,
+  prepare,
+}

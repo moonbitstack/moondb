@@ -163,11 +163,11 @@ fn decode_binary_value(
   let t = col.column_type
   let unsigned = (col.flags & UNSIGNED_FLAG) != 0
   if t == MYSQL_TYPE_TINY {
-    @moondb.Int(read_int(r.bytes(1), 1, unsigned))
+    read_int(r.bytes(1), 1, unsigned)
   } else if t == MYSQL_TYPE_SHORT || t == MYSQL_TYPE_YEAR {
-    @moondb.Int(read_int(r.bytes(2), 2, unsigned))
+    read_int(r.bytes(2), 2, unsigned)
   } else if t == MYSQL_TYPE_LONG || t == MYSQL_TYPE_INT24 {
-    @moondb.Int(read_int(r.bytes(4), 4, unsigned))
+    read_int(r.bytes(4), 4, unsigned)
   } else if t == MYSQL_TYPE_LONGLONG {
     read_bigint(r.bytes(8), unsigned)
   } else if t == MYSQL_TYPE_FLOAT {
@@ -211,7 +211,11 @@ fn lenenc_or_empty(r : PacketReader) -> Bytes raise MysqlError {
 }
 
 ///|
-fn read_int(b : Bytes, width : Int32, unsigned : Bool) -> Int32 {
+/// Decode a little-endian integer cell of `width` bytes. An unsigned value wider than
+/// `Int32` is returned as `Int64` instead of being truncated: `INT UNSIGNED` reaches
+/// 4294967295, which has no 32-bit fit, and silently wrapping it to -1 is the kind of
+/// wrong answer that survives a test only if the test never asks.
+fn read_int(b : Bytes, width : Int32, unsigned : Bool) -> @moondb.Value {
   let mut v : Int64 = 0L
   for i = 0; i < width; i = i + 1 {
     v = v | (b[i].to_int64() << (8 * i))
@@ -222,8 +226,13 @@ fn read_int(b : Bytes, width : Int32, unsigned : Bool) -> Int32 {
     if v >= sign_bit {
       v = v - (1L << bits)
     }
+    return @moondb.Int(v.to_int())
   }
-  v.to_int()
+  if v > 2147483647L {
+    @moondb.Int64(v)
+  } else {
+    @moondb.Int(v.to_int())
+  }
 }
 
 ///|

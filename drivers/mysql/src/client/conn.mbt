@@ -144,6 +144,7 @@ pub async fn MysqlConn::connect(
   password : String,
   database : String,
   tls? : @tls.Client,
+  charset~ : Int32 = 45,
 ) -> MysqlConn {
   let addr = @socket.Addr::resolve(host, port~)
   let tcp = @socket.Tcp::connect(addr)
@@ -160,7 +161,7 @@ pub async fn MysqlConn::connect(
     write_packet_stream(
       (tcp : &@io.Writer),
       greeting_seq + 1,
-      @moonmysql.build_ssl_request(database),
+      @moonmysql.build_ssl_request(database, charset~),
     )
     let client = match tls {
       Some(c) => c
@@ -193,7 +194,14 @@ pub async fn MysqlConn::connect(
   // Close the socket on any handshake failure — a bad-credentials ERR is the
   // common case, and MoonBit has no fd finalizer to reclaim a leaked socket.
   errdefer conn.stream.close()
-  conn.send_handshake_response(handshake, user, pw, database, ssl=use_tls)
+  conn.send_handshake_response(
+    handshake,
+    user,
+    pw,
+    database,
+    ssl=use_tls,
+    charset~,
+  )
   conn.finish_auth(handshake, pw, use_tls)
   conn.learn_quoting()
   conn
@@ -247,6 +255,7 @@ async fn MysqlConn::send_handshake_response(
   pw : Bytes,
   database : String,
   ssl~ : Bool,
+  charset~ : Int32,
 ) -> Unit {
   let response = @moonmysql.build_handshake_response(
     handshake,
@@ -254,6 +263,7 @@ async fn MysqlConn::send_handshake_response(
     pw,
     database,
     ssl~,
+    charset~,
   )
   // The handshake response follows the greeting (and the SSLRequest, when TLS
   // was negotiated) on the sequence number.
@@ -398,9 +408,16 @@ priv enum Outcome {
 }
 
 ///|
-/// Send a `COM_QUERY` carrying `query_bytes` and drive the text-protocol
-/// response state machine to completion.
-async fn MysqlConn::command(self : MysqlConn, query_bytes : Bytes) -> Outcome {
+/// Send a `COM_QUERY` carrying `query_bytes` and read **every** result set it
+/// produces. One statement can answer with more than one — a stored procedure's
+/// `CALL`, a multi-statement packet — and the wire has no way to say so up front:
+/// the status flag on each terminator announces the next one. Reading only the first
+/// and leaving the rest on the socket desynchronises the connection, so the whole
+/// chain is consumed here and the caller picks what it needs.
+async fn MysqlConn::command_all(
+  self : MysqlConn,
+  query_bytes : Bytes,
+) -> Array[Outcome] {
   if self.closed {
     raise @moondb.Closed
   }
@@ -414,66 +431,103 @@ async fn MysqlConn::command(self : MysqlConn, query_bytes : Bytes) -> Outcome {
   payload.write_bytes(query_bytes[:])
   // A fresh command always starts at sequence id 0.
   self.write_packet(0, payload.to_bytes())
-  let first = self.read_packet()
-  if @moonmysql.is_err_packet(first) {
-    raise @moonmysql.parse_err(first)
-  }
-  if @moonmysql.is_ok_packet(first) {
-    let ok = @moonmysql.parse_ok(first)
-    if (ok.status & @moonmysql.server_more_results_exists) != 0 {
-      raise @moonmysql.UnsupportedError(
-        "the server returned more than one result set; run one statement per query",
-      )
+  let outcomes : Array[Outcome] = []
+  let mut more = true
+  while more {
+    let first = self.read_packet()
+    if @moonmysql.is_err_packet(first) {
+      raise @moonmysql.parse_err(first)
     }
-    return Exec(ok)
-  }
-  if first.length() > 0 && first[0].to_int() == 0xFB {
-    raise @moonmysql.UnsupportedError("LOCAL INFILE is not supported")
-  }
-  let reader = @moonmysql.PacketReader::new(first)
-  let column_count = reader.lenenc_uint().to_int()
-  let columns : Array[@moonmysql.ColumnDef] = []
-  for _ in 0..<column_count {
-    columns.push(@moonmysql.parse_column_def(self.read_packet()))
-  }
-  // CLIENT_DEPRECATE_EOF is not negotiated, so an EOF closes the column block.
-  let after_columns = self.read_packet()
-  if @moonmysql.is_err_packet(after_columns) {
-    raise @moonmysql.parse_err(after_columns)
-  }
-  let rows : Array[Bytes] = []
-  // If the column-terminator was itself a row (defensive), keep it.
-  if !@moonmysql.is_eof_packet(after_columns) {
-    rows.push(after_columns)
-  }
-  for ;; {
-    let p = self.read_packet()
-    if @moonmysql.is_err_packet(p) {
-      raise @moonmysql.parse_err(p)
+    if @moonmysql.is_ok_packet(first) {
+      let ok = @moonmysql.parse_ok(first)
+      more = (ok.status & @moonmysql.server_more_results_exists) != 0
+      outcomes.push(Exec(ok))
+      continue
     }
-    if @moonmysql.is_eof_packet(p) {
-      if @moonmysql.has_more_results(p) {
-        raise @moonmysql.UnsupportedError(
-          "the server returned more than one result set; run one statement per query",
-        )
+    if first.length() > 0 && first[0].to_int() == 0xFB {
+      raise @moonmysql.UnsupportedError("LOCAL INFILE is not supported")
+    }
+    let reader = @moonmysql.PacketReader::new(first)
+    let column_count = reader.lenenc_uint().to_int()
+    let columns : Array[@moonmysql.ColumnDef] = []
+    for _ in 0..<column_count {
+      columns.push(@moonmysql.parse_column_def(self.read_packet()))
+    }
+    // CLIENT_DEPRECATE_EOF is not negotiated, so an EOF closes the column block.
+    let after_columns = self.read_packet()
+    if @moonmysql.is_err_packet(after_columns) {
+      raise @moonmysql.parse_err(after_columns)
+    }
+    let rows : Array[Bytes] = []
+    // If the column-terminator was itself a row (defensive), keep it.
+    if !@moonmysql.is_eof_packet(after_columns) {
+      rows.push(after_columns)
+    }
+    let mut terminator = after_columns
+    for ;; {
+      let p = self.read_packet()
+      if @moonmysql.is_err_packet(p) {
+        raise @moonmysql.parse_err(p)
       }
-      break
+      if @moonmysql.is_eof_packet(p) {
+        terminator = p
+        break
+      }
+      rows.push(p)
     }
-    rows.push(p)
+    more = @moonmysql.has_more_results(terminator)
+    outcomes.push(Rows(columns, rows))
   }
-  Rows(columns, rows)
+  outcomes
 }
 
 ///|
-/// A prepared statement's server-side handle.
-priv struct Prepared {
-  id : Int32
+/// Run a statement that answers with more than one result set and return every set,
+/// in the order the server sent them — a stored procedure's `CALL`, or a
+/// multi-statement packet. Values bind only on the prepared path, which has no
+/// multi-result protocol of its own, so `params` must be empty here.
+pub async fn MysqlConn::query_multi(
+  self : MysqlConn,
+  sql : String,
+  params : Array[@moondb.Value],
+) -> Array[Array[@moondb.Row]] {
+  if params.length() > 0 {
+    raise @moonmysql.UnsupportedError(
+      "multiple result sets are only read on the text protocol; pass no parameters",
+    )
+  }
+  let outcomes = self.command_all(
+    @moonmysql.bind_params(sql, params, mode=self.quote_mode),
+  )
+  let sets : Array[Array[@moondb.Row]] = []
+  for outcome in outcomes {
+    match outcome {
+      Exec(_) => sets.push([])
+      Rows(columns, row_payloads) =>
+        sets.push(@moonmysql.build_text_rows(columns, row_payloads))
+    }
+  }
+  sets
+}
+
+///|
+/// Send a `COM_QUERY` and return its **first** result, draining any further ones so
+/// the connection stays usable. The single-result path every `execute`/`query` takes.
+async fn MysqlConn::command(self : MysqlConn, query_bytes : Bytes) -> Outcome {
+  let outcomes = self.command_all(query_bytes)
+  match outcomes[0] {
+    Exec(ok) => Exec(ok)
+    Rows(columns, rows) => Rows(columns, rows)
+  }
 }
 
 ///|
 /// COM_STMT_PREPARE: allocate a server-side statement for `sql`, consuming the
 /// parameter and column definitions up to their EOF packets.
-async fn MysqlConn::prepare(self : MysqlConn, sql : String) -> Prepared {
+async fn MysqlConn::compile(
+  self : MysqlConn,
+  sql : String,
+) -> @moonmysql.StmtOk {
   if self.closed {
     raise @moondb.Closed
   }
@@ -506,7 +560,7 @@ async fn MysqlConn::prepare(self : MysqlConn, sql : String) -> Prepared {
       raise @moonmysql.ProtocolError("expected EOF after statement columns")
     }
   }
-  { id: ok.id, }
+  ok
 }
 
 ///|
@@ -564,7 +618,7 @@ async fn MysqlConn::prepared_query(
   sql : String,
   params : Array[@moondb.Value],
 ) -> Array[@moondb.Row] {
-  let stmt = self.prepare(sql)
+  let stmt = self.compile(sql)
   errdefer self.stmt_close(stmt.id)
   let rows = self.read_prepared_rows(stmt.id, params)
   self.stmt_close(stmt.id)
@@ -577,7 +631,7 @@ async fn MysqlConn::prepared_execute(
   sql : String,
   params : Array[@moondb.Value],
 ) -> @moondb.ExecResult {
-  let stmt = self.prepare(sql)
+  let stmt = self.compile(sql)
   errdefer self.stmt_close(stmt.id)
   self.write_packet(0, @moonmysql.build_stmt_execute(stmt.id, params))
   let first = self.read_packet()
