@@ -48,12 +48,14 @@
       <p class="folio">Article I — the contract</p>
       <h2>The <code class="inline">Driver</code> trait</h2>
       <p class="muted">
-        Eight operations. No more. A backend implements <code class="inline">execute</code>,
-        <code class="inline">query</code>, the three transaction brackets, and
-        <code class="inline">close</code>; <code class="inline">ping</code> and
-        <code class="inline">query_stream</code> come with sensible defaults. Values cross
-        the boundary as <code class="inline">Value</code> — never spliced into SQL — so
-        binding is injection-safe by construction.
+        Eight operations, plus one declaration. A backend implements
+        <code class="inline">execute</code>, <code class="inline">query</code>, the three
+        transaction brackets, <code class="inline">close</code>, and says which dialect it
+        speaks; <code class="inline">ping</code>, <code class="inline">query_stream</code>,
+        <code class="inline">prepare</code> and <code class="inline">capabilities</code>
+        come with sensible defaults. Values cross the boundary as
+        <code class="inline">Value</code> — never spliced into SQL — so binding is
+        injection-safe by construction.
       </p>
       <pre class="signature"><span class="kw">pub(open) trait</span> Driver {
   <span class="kw">fn</span> execute(Self, String, Array[Value]) -&gt; ExecResult <span class="kw">raise</span> DbError
@@ -63,8 +65,18 @@
   <span class="kw">fn</span> commit(Self) -&gt; Unit <span class="kw">raise</span> DbError
   <span class="kw">fn</span> rollback(Self) -&gt; Unit <span class="kw">raise</span> DbError
   <span class="kw">fn</span> close(Self) -&gt; Unit
-  fn ping(Self) -> Bool = _                                                  <span class="kw">// default</span>
+  <span class="kw">fn</span> ping(Self) -&gt; Bool = _                                          <span class="kw">// default</span>
+  <span class="kw">fn</span> prepare(Self, String) -&gt; &amp;Stmt <span class="kw">raise</span> DbError = _          <span class="kw">// default</span>
+  <span class="kw">fn</span> dialect(Self) -&gt; Dialect
+  <span class="kw">fn</span> capabilities(Self) -&gt; Capabilities = _                          <span class="kw">// default</span>
 }</pre>
+      <p class="muted">
+        Above the backend sit <code class="inline">Stmt</code> (prepare once, bind again),
+        <code class="inline">Txn</code> (a closure that nests through savepoints),
+        <code class="inline">rewrite_named</code> (a <code class="inline">:name</code> lexer
+        that knows each dialect's spelling) and <code class="inline">Executor</code> (the
+        view that runs SQL but cannot close the connection).
+      </p>
     </section>
 
     <section class="section" id="drivers">
@@ -81,7 +93,7 @@
           <div class="phase-name">waxing crescent</div>
           <h3>moonmysql</h3>
           <p>The MySQL/MariaDB implementation of the contract.</p>
-          <ul class="coverage"><li>execute</li><li>query</li><li>transaction</li><li>ping</li></ul>
+          <ul class="coverage"><li>prepared</li><li>named params</li><li>savepoints</li><li>multi-result</li><li>unsigned</li></ul>
           <a class="ghost" href="mysql.html">read the statute →</a>
         </div>
         <div class="driver" id="moonpostgres">
@@ -89,7 +101,7 @@
           <div class="phase-name">waxing gibbous</div>
           <h3>moonpostgres</h3>
           <p>The PostgreSQL implementation of the contract.</p>
-          <ul class="coverage"><li>execute</li><li>query</li><li>transaction</li><li>ping</li></ul>
+          <ul class="coverage"><li>prepared + cache</li><li>server cursor</li><li>COPY ⇄</li><li>savepoints</li><li>TLS · SCRAM</li></ul>
           <a class="ghost" href="postgres.html">read the statute →</a>
         </div>
         <div class="driver" id="moonsqlite">
@@ -97,7 +109,7 @@
           <div class="phase-name">full moon</div>
           <h3>moonsqlite</h3>
           <p>The SQLite implementation of the contract — embedded, no server.</p>
-          <ul class="coverage"><li>execute</li><li>query</li><li>transaction</li><li>ping</li></ul>
+          <ul class="coverage"><li>prepared</li><li>named params</li><li>savepoints</li><li>RETURNING</li></ul>
           <a class="ghost" href="sqlite.html">read the statute →</a>
         </div>
       </div>

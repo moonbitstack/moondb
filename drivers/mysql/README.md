@@ -4,8 +4,9 @@
 
 A **pure-MoonBit MySQL / MariaDB wire-protocol driver** — no C, no bindings, like
 PyMySQL. It speaks the MySQL client/server protocol (version 10 handshake,
-`mysql_native_password` auth, the text `COM_QUERY` protocol) directly over a raw
-TCP socket, and implements the [`@moondb.Driver`](https://github.com/moonbitstack/moondb)
+`mysql_native_password` / `caching_sha2_password` / MariaDB `client_ed25519` auth,
+the text `COM_QUERY` protocol and the binary prepared-statement protocol) directly
+over a raw socket, and implements the [`@moondb.Driver`](https://github.com/moonbitstack/moondb)
 contract so a moondb-based query layer (moonorm) can talk to MySQL through the
 same seam as the SQLite and Postgres drivers.
 
@@ -120,13 +121,21 @@ shortcut.
 
 ## Injection safety
 
-Values never reach the server as SQL text unescaped. The text protocol has no
-out-of-band parameter binding (that arrives with prepared statements — see the
-roadmap), so this round renders each bound `@moondb.Value` as an escaped SQL
-literal: strings are single-quoted with every metacharacter backslash-escaped,
-blobs use the `x'…'` hex form, and the placeholder scanner tracks single-,
-double-, and backtick-quoted spans so a literal `?` inside a string is never
-mistaken for a placeholder.
+Values never reach the server as SQL text unescaped. A statement with parameters
+goes over `COM_STMT_PREPARE`/`COM_STMT_EXECUTE`, where the values travel in the
+binary protocol and the SQL text is never built — the server has already parsed
+it. The text protocol is used only for a statement with no parameters.
+
+## Prepared statements
+
+`MysqlConn::prepare` sends `COM_STMT_PREPARE` and returns an `@moondb.AsyncStmt`:
+`bind` sends new values, `execute`/`query` run the statement, `close` sends
+`COM_STMT_CLOSE`. A `:name` statement is rewritten to `?` at prepare time and the
+slot names are kept, so `bind_named` takes a map.
+
+The binary protocol's row decoder reads the column flags word: an `INT UNSIGNED`
+above 2^31-1 comes back as `Int64` rather than a negative `Int`, and a
+`BIGINT UNSIGNED` above 2^63-1 keeps its exact digits as `Text`.
 
 ## Type mapping (text protocol)
 
@@ -152,30 +161,46 @@ The pure codec additionally runs on every backend, and `parse_server_version`
 has a unit test covering both MariaDB's `5.5.5-` sentinel and a plain MySQL
 version string.
 
-### MariaDB auth negotiation
+### Authentication
 
-`mysql_native_password` is the tested path on both servers. If a server's default
-plugin differs but it still offers pluggable auth, the client advertises
-`mysql_native_password` and answers the server's `AuthSwitchRequest` for it — the
-down-negotiation MariaDB may require. A switch to any other plugin, or a
-`caching_sha2_password` full-auth exchange, raises a clear `UnsupportedError`
-pointing here rather than silently mis-authenticating.
+- **`mysql_native_password`** — SHA1 scramble, and the down-negotiation a MariaDB
+  server may ask for through `AuthSwitchRequest`.
+- **`caching_sha2_password`** — MySQL 8's default. The fast path uses the cached
+  SHA256 scramble; a cold cache triggers full authentication, where the password
+  is XOR-ed with the nonce and sealed with RSA-OAEP under the server's public key.
+  Over TLS the credential goes in the clear, which is what the protocol specifies.
+- **`client_ed25519`** — MariaDB's plugin: the 32-byte nonce is signed with the
+  password-derived Ed25519 secret, and a wrong signature fails the login. CI
+  creates an ed25519 account and authenticates through it.
+- **TLS** — `MysqlDriver::new(tls=…)` / `MysqlConn::connect(tls=…)` swap the
+  transport after the greeting; the `SSLRequest` and the handshake response carry
+  the same capability word.
 
-## Roadmap
+Any other plugin raises a clear `UnsupportedError` rather than silently
+mis-authenticating.
 
-This round covers connect + `mysql_native_password` auth + the text protocol +
-value decode + the `@moondb.Driver` adapter + a real roundtrip. Planned next:
+### Result sets, charsets, unsigned columns
 
-- **Prepared statements** — `COM_STMT_PREPARE`/`COM_STMT_EXECUTE`, the binary
-  protocol, and true out-of-band parameter binding.
-- **`caching_sha2_password`** — MySQL 8's default plugin, including the RSA
-  full-auth exchange over a plain connection.
-- **`client_ed25519`** — MariaDB's native Ed25519 auth plugin, for MariaDB
-  accounts not using `mysql_native_password`.
-- **Full type coverage** — binary-protocol temporal/decimal/bit decoding, and a
-  dedicated temporal `Value` case once moondb grows one.
-- **Connection pooling** and a streaming `Rows` cursor.
-- **TLS** once `moonbitlang/async` exposes a client-side entry point.
+One statement may answer with more than one result set — a stored procedure's
+`CALL` does. `MysqlConn::query_multi` returns every set in the order the server
+sent them; the single-result path drains the rest so the connection stays in step.
+`CLIENT_MULTI_RESULTS` and `CLIENT_MULTI_STATEMENTS` are advertised for this.
+
+The connection charset is the `charset` parameter of `connect` (a collation id,
+`45` = `utf8mb4_general_ci` by default). A charset whose trailing byte can be
+`0x5C` (`gbk`, `big5`, `sjis`, `cp932`, `gb18030`) is refused when escaping would
+be load-bearing, because a backslash there can continue a multibyte character.
+
+## Not covered
+
+- **`sha256_password`** — MySQL's older RSA plugin, superseded by
+  `caching_sha2_password` and not a default anywhere current.
+- **Compressed protocol** and the **X protocol**. Neither changes what a query
+  layer can ask for.
+- **`COM_STMT_SEND_LONG_DATA`** — a value larger than `max_allowed_packet` has to
+  be chunked by the caller today.
+- **`LOAD DATA LOCAL INFILE`**. It is disabled on most servers; `COPY`-style bulk
+  loading goes through prepared statements here.
 
 ## Parameter binding
 

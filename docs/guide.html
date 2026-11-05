@@ -40,6 +40,9 @@
         <a href="#implement">Implement Driver</a>
         <a href="#values">Values &amp; params</a>
         <a href="#rows">Reading rows</a>
+        <a href="#statements">Statements &amp; names</a>
+        <a href="#nested">Nested transactions</a>
+        <a href="#dialects">Dialects &amp; capabilities</a>
         <a href="#defaults">Defaults &amp; overrides</a>
         <a href="#orm">Built on moondb</a>
       </aside>
@@ -48,7 +51,7 @@
         <section class="hero" style="padding-top:var(--s5)">
           <p class="folio">Guide</p>
           <h1 style="font-size:clamp(30px,4vw,46px)">Ratify the contract</h1>
-          <p class="lede">Implementing <code class="inline">Driver</code> is how a backend joins the moondb family. You write five operations; the other two are given to you.</p>
+          <p class="lede">Implementing <code class="inline">Driver</code> is how a backend joins the moondb family. You write seven operations and declare one dialect; the rest are given to you.</p>
         </section>
 
         <section class="section" id="install">
@@ -61,7 +64,7 @@
         <section class="section" id="implement">
           <p class="folio">§2</p>
           <h2>Implement the trait</h2>
-          <p class="muted">A driver is a struct that owns the connection handle, plus an <code class="inline">impl Driver</code> block. You must supply <code class="inline">execute</code>, <code class="inline">query</code>, <code class="inline">begin</code>, <code class="inline">commit</code>, <code class="inline">rollback</code>, and <code class="inline">close</code>.</p>
+          <p class="muted">A driver is a struct that owns the connection handle, plus an <code class="inline">impl Driver</code> block. You must supply <code class="inline">execute</code>, <code class="inline">query</code>, <code class="inline">begin</code>, <code class="inline">commit</code>, <code class="inline">rollback</code>, <code class="inline">close</code>, and <code class="inline">dialect</code> — a query layer reads the last one to know how to spell a placeholder.</p>
           <pre class="signature"><span class="kw">pub</span> <span class="kw">struct</span> MyConn {
   dsn : String
   <span class="kw">mut</span> closed : Bool
@@ -111,7 +114,11 @@
   self.closed = true
 }
 
-<span class="kw">extend</span> MyConn <span class="kw">with</span> @moondb.Driver::{ping, close}
+<span class="kw">impl</span> @moondb.Driver <span class="kw">for</span> MyConn <span class="kw">with</span> <span class="kw">fn</span> dialect(_self) -&gt; @moondb.Dialect {
+  @moondb.Dialect::Sqlite
+}
+
+<span class="kw">extend</span> MyConn <span class="kw">with</span> @moondb.Driver::{ping, close, dialect}
 
 <span class="kw">pub</span> <span class="kw">fn</span> healthy(conn : MyConn) -&gt; Bool {
   conn.ping()
@@ -129,6 +136,8 @@
           <pre class="signature"><span class="kw">pub(all) enum</span> Value {
   Null | Bool(Bool) | Int(Int32) | Int64(Int64)
   | Double(Double) | Text(String) | Blob(Bytes)
+  | Time(String) | Numeric(String) | Uuid(Bytes)
+  | Json(String) | Array(Array[Value])
 }</pre>
           <p class="muted">Use <code class="inline">Value::kind</code> and <code class="inline">Value::is_null</code> when classifying an inbound value.</p>
         </section>
@@ -146,16 +155,60 @@
 }</pre>
         </section>
 
-        <section class="section" id="defaults">
+        <section class="section" id="statements">
           <p class="folio">§5</p>
+          <h2>Statements &amp; names</h2>
+          <p class="muted"><code class="inline">prepare</code> returns a <code class="inline">Stmt</code> — a handle that runs one SQL text with new values. Override it when the server can parse once; the default keeps the text and re-runs the ordinary path, so every driver hands out a working handle either way.</p>
+          <pre class="signature"><span class="kw">let</span> stmt = conn.prepare("INSERT INTO hero VALUES (:id, :name)")
+<span class="kw">let</span> args : Map[String, @moondb.Value] = Map([])
+args.set("id", @moondb.Value::Int(1))
+args.set("name", @moondb.Value::Text("Nova"))
+stmt.bind_named(args)
+stmt.execute()
+stmt.close()</pre>
+          <p class="muted">A driver that prepares rewrites <code class="inline">:name</code> itself and reports the slot names from <code class="inline">params</code>, so <code class="inline">bind_named</code> needs no numbering from the caller. Outside a driver, <code class="inline">@moondb.rewrite_named(sql, dialect)</code> does the rewrite and <code class="inline">Named::bind</code> orders the values; the lexer leaves string literals, quoted identifiers, comments, dollar-quoted bodies, casts and array slices alone.</p>
+        </section>
+
+        <section class="section" id="nested">
+          <p class="folio">§6</p>
+          <h2>Nested transactions</h2>
+          <p class="muted"><code class="inline">Txn</code> brackets a body: the outermost call opens a transaction, a nested one opens a savepoint, and a failure undoes only its own level. Nothing to implement — it speaks <code class="inline">begin</code>/<code class="inline">commit</code>/<code class="inline">rollback</code> and the three savepoint statements, which every backend here accepts.</p>
+          <pre class="signature"><span class="kw">let</span> tx = @moondb.Txn::new(conn)
+tx.run(<span class="kw">fn</span>(tx) <span class="kw">raise</span> @moondb.DbError {
+  tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [Int(1), Text("Nova")])
+  tx.run(<span class="kw">fn</span>(tx) <span class="kw">raise</span> @moondb.DbError {
+    <span class="kw">// nested: a savepoint, not a second transaction
+    tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [Int(2), Text("Iris")])
+  })
+})</pre>
+          <p class="muted">For an async driver, <code class="inline">AsyncTxn</code> is the same with every round trip awaited.</p>
+        </section>
+
+        <section class="section" id="dialects">
+          <p class="folio">§7</p>
+          <h2>Dialects &amp; capabilities</h2>
+          <p class="muted"><code class="inline">dialect</code> spells a placeholder; <code class="inline">capabilities</code> says what the backend can do beyond the base contract. Both are derived from the dialect by default, so a driver declares one thing.</p>
+          <pre class="signature"><span class="kw">let</span> d = conn.dialect()
+d.placeholder(1)   <span class="kw">//</span> "?" or "$1"
+<span class="kw">let</span> caps = conn.capabilities()
+caps.server_cursors <span class="kw">//</span> a cursor the server holds open
+caps.streaming_copy <span class="kw">//</span> COPY in both directions, chunk by chunk
+caps.unsigned_integers <span class="kw">//</span> an unsigned 64-bit column keeps its value</pre>
+          <p class="muted">A query layer reads these once and lowers its plan, instead of discovering a missing feature mid-statement. <code class="inline">@moondb.Executor::new(conn)</code> is the narrower view: run SQL, but no <code class="inline">close</code> and no transaction — the handle a repository method should receive.</p>
+        </section>
+
+        <section class="section" id="defaults">
+          <p class="folio">§8</p>
           <h2>Defaults &amp; overrides</h2>
-          <p class="muted">Two operations ship with defaults you may keep or override:</p>
+          <p class="muted">Four operations ship with defaults you may keep or override:</p>
           <div class="article"><div class="num">i</div><div class="body"><h3>ping → Bool</h3><p class="muted">Default issues <code class="inline">SELECT 1</code> and returns whether it round-trips, never raising. Override with a cheaper heartbeat if your backend has one.</p></div></div>
           <div class="article"><div class="num">ii</div><div class="body"><h3>query_stream → &amp;Cursor</h3><p class="muted">Default materialises via <code class="inline">query</code> and returns an <code class="inline">ArrayCursor</code>. A driver with incremental fetch overrides this with a live cursor for bounded memory.</p></div></div>
+          <div class="article"><div class="num">iii</div><div class="body"><h3>prepare → &amp;Stmt</h3><p class="muted">Default returns a buffered handle that re-runs <code class="inline">execute</code>/<code class="inline">query</code>. Override when the server can parse once.</p></div></div>
+          <div class="article"><div class="num">iv</div><div class="body"><h3>capabilities → Capabilities</h3><p class="muted">Default is the preset for the reported dialect. Override only if the driver implements a different subset than the preset claims.</p></div></div>
         </section>
 
         <section class="section" id="orm">
-          <p class="folio">§6</p>
+          <p class="folio">§9</p>
           <h2>Built on moondb</h2>
           <p class="muted">ORMs such as <a href="https://moonbitstack.github.io/moonorm/">moonorm</a> write their SQL generation against the <code class="inline">Driver</code> trait — not against any one backend. That is the whole point of the contract: one query layer, every ratified driver.</p>
           <div class="cta">

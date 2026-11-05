@@ -66,9 +66,13 @@ sequenceDiagram
 ```
 
 - **Framing** — every message is a 1-byte type tag, a big-endian `Int32` self-inclusive length, and a payload (the untagged StartupMessage aside).
-- **Auth** — `AuthenticationOk` (trust), cleartext, and **MD5** (`md5(md5(password+user)+salt)`, with a self-contained pure-MoonBit MD5). SCRAM-SHA-256 is on the roadmap.
+- **Auth** — `AuthenticationOk` (trust), cleartext, **MD5** (`md5(md5(password+user)+salt)`, pure MoonBit), and **SCRAM-SHA-256**: SASLprep over the password (RFC 4013), the `SCRAM-SHA-256-PLUS` variant with channel binding when the server offers it, and server-signature verification so a peer that cannot prove it knows the stored key is rejected. TLS is negotiated with `SSLRequest`; a server that answers `N` is an error, never a silent downgrade.
 - **Simple query** (`Q`) when there are no parameters; **extended query** (`Parse`/`Bind`/`Describe`/`Execute`/`Sync`) when there are, with `?`→`$n` translation and out-of-band **text-format** binding.
-- **Decoding** — `RowDescription` + `DataRow` decode into `@moondb.Row`; column type OIDs map `int2`/`int4`→`Int`, `int8`→`Int64`, `float4`/`float8`→`Double`, `bool`→`Bool`, `bytea`→`Blob`, everything else→`Text`.
+- **Decoding** — `RowDescription` + `DataRow` decode into `@moondb.Row` by column type OID: `int2`/`int4`→`Int`, `int8`→`Int64`, `float4`/`float8`→`Double`, `bool`→`Bool`, `bytea`→`Blob`, `numeric`→`Numeric`, `uuid`→`Uuid`, `json`/`jsonb`→`Json`, the date/time types→`Time`. An OID the table does not know — an enum or a domain — reads as `Text`, which is what asyncpg does.
+- **Prepared statements** — `Parse` under a generated name, cached by SQL text, so a repeated statement binds instead of re-parsing; `prepare` hands that handle out as `@moondb.AsyncStmt`.
+- **Cursors** — `DECLARE`/`FETCH`/`CLOSE` as a `PgCursor` that pulls a batch per round trip, plus `PgRowStream` for one statement's response read off the wire.
+- **COPY** — both directions streamed: `copy_in_stream` writes one chunk per call, `copy_out_stream` reads one, and neither holds the payload.
+- **Session** — `LISTEN`/`NOTIFY`, `ParameterStatus` tracking, `CancelRequest` on a second connection.
 
 ## Why the driver is async
 
@@ -92,18 +96,17 @@ This is the language-idiomatic equivalent, not a shortcut: asyncpg is async for 
 ## Testing
 
 - **Unit** (`moon test`) — MD5 vectors, `?`→`$n` translation (literals/identifiers/comments/dollar-quotes/`??`), value encode/decode by OID, and message framing + `RowDescription`/`DataRow` decode against synthetic backend messages.
-- **Integration** (`moon test`, gated on `MOON_PG_TEST`) — connect / DDL / parameterised INSERT / SELECT round trip and transaction commit+rollback against a **real PostgreSQL**. Skipped when `MOON_PG_TEST` is unset (local checkout without a database); CI stands up a `postgres:16` service and runs it. Connection parameters come from the standard `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` variables.
+- **Off-machine** — the same state machine over an in-memory pipe with a scripted peer: the statement cache, the streaming guard, the post-error drain, the prepared handle, `Close` reclaiming a statement, the server-side cursor, and `COPY` in and out chunk by chunk.
+- **Integration** (`moon test`, gated on `MOON_PG_TEST`) — connect / DDL / parameterised INSERT / SELECT round trip, transactions, savepoint scope, cursors, prepared handles and a 100 MB `COPY` in and out against a **real PostgreSQL**. Skipped when `MOON_PG_TEST` is unset (local checkout without a database); CI stands up a `postgres:16` service and runs it. Connection parameters come from the standard `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` variables.
 
 The `DataRow` decoder is mutation-checked: breaking it makes the decode test fail with a type error.
 
-## Roadmap
+## Not covered
 
-This round covers connect + auth (MD5/trust) + simple query + text decode + `?`→`$n` + `@moondb.AsyncDriver` conformance + a real round trip. Later rounds:
-
-- **SCRAM-SHA-256** authentication (the default for PostgreSQL 14+ with a password set).
-- **Binary result/parameter format** and a **type-OID registry** (numeric, dates/times, arrays, JSON, UUID).
-- **Prepared statements** (named, cached) and a streaming `Rows` cursor.
-- **`RETURNING`**-based `last_insert_id`, `COPY`, `LISTEN`/`NOTIFY`, TLS, and a connection pool.
+- **Binary result format.** Parameters are sent as text and results are read as text; the binary format is a per-type encoding table with no behavioural gain for the value model moondb defines.
+- **Pipeline mode** (PostgreSQL 14+). The wire seam already speaks one message batch at a time; batching independent statements would be a latency optimisation, not a capability.
+- **Logical replication** and `COPY BOTH`. The copy sub-protocol here is client-side in and out.
+- **Large objects** (`lo_*`). Use `bytea` or the copy path instead.
 
 ## License
 

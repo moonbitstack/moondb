@@ -36,25 +36,25 @@
     <div class="doc-grid">
       <aside class="side">
         <div class="grp">Packages</div>
-        <a href="#moondb">moondb<span class="n">73</span></a>
+        <a href="#moondb">moondb<span class="n">121</span></a>
 <a href="#pool">pool<span class="n">16</span></a>
 <a href="#apool">apool<span class="n">12</span></a>
-<a href="#moonsqlite">moonsqlite<span class="n">14</span></a>
-<a href="#moonpostgres">moonpostgres<span class="n">61</span></a>
-<a href="#moonmysql">moonmysql<span class="n">69</span></a>
-<a href="#moonmysql-client">client<span class="n">14</span></a>
+<a href="#moonsqlite">moonsqlite<span class="n">21</span></a>
+<a href="#moonpostgres">moonpostgres<span class="n">69</span></a>
+<a href="#moonmysql">moonmysql<span class="n">71</span></a>
+<a href="#moonmysql-client">client<span class="n">20</span></a>
       </aside>
 
       <div>
         <section class="hero" style="padding-top:var(--s5)">
           <p class="folio">API · generated</p>
           <h1 style="font-size:clamp(30px,4vw,46px)">The interface</h1>
-          <p class="lede">259 declarations across 7 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
+          <p class="lede">330 declarations across 7 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
         </section>
 <section class="section first" id="moondb">
 <p class="folio">moonbitstack/moondb</p>
 <h2>moondb</h2>
-<h3>Types <span class="count">15</span></h3>
+<h3>Types <span class="count">28</span></h3>
 <div class="entry"><pre class="signature">pub struct ArrayCursor {
   rows : Array[Row]
   mut pos : Int32
@@ -76,7 +76,61 @@
   async fn rollback(Self) -&gt; Unit raise DbError
   async fn close(Self) -&gt; Unit
   async fn ping(Self) -&gt; Bool = _
+  async fn prepare(Self, String) -&gt; &amp;AsyncStmt raise DbError = _
+  fn dialect(Self) -&gt; Dialect = _
+  fn capabilities(Self) -&gt; Capabilities = _
 }</pre><div class="doc"><p>The contract a backend that talks over a network implements — <code class="inline">Driver</code> with every round trip awaited.</p><p>## Why there are two driver traits</p><p><code class="inline">Driver</code> is synchronous, which fits a backend whose calls block in C: moonsqlite steps a prepared statement and returns. A backend reached over TCP cannot be written that way in MoonBit, because the only socket stack (<code class="inline">moonbitlang/async</code>) is async-only and an <code class="inline">async fn</code> cannot be called from a synchronous one. A wire driver forced to conform to <code class="inline">Driver</code> can therefore do nothing but raise — and, worse, it raises from <code class="inline">ping</code> too, so a <code class="inline">Pool</code> with <code class="inline">pre_ping</code> judges every one of its connections permanently unhealthy.</p><p><code class="inline">AsyncDriver</code> is the seam for those backends. It is a peer of <code class="inline">Driver</code>, not a replacement: a synchronous backend keeps implementing <code class="inline">Driver</code> and does not become async to satisfy anything here. The two traits are deliberately identical method for method, so a query layer can offer a sync and an async path that read the same.</p><p>Everything <code class="inline">Driver</code> documents about the calling convention holds unchanged: <code class="inline">sql</code> carries positional placeholders in the backend's own spelling, <code class="inline">params</code> supplies one <code class="inline">Value</code> per placeholder in order, and values are bound out-of-band rather than interpolated.</p><p>This trait declares <code class="inline">async</code> methods but pulls in no async runtime — moondb stays dependency-free and still compiles on every backend. Only a driver that implements it, and a caller that runs it inside an event loop, need the runtime.</p><p><code class="inline">pub(open)</code> so out-of-tree drivers (moonpostgres, moonmysql, …) implement it.</p></div></div>
+<div class="entry"><pre class="signature">pub struct AsyncExecutor[T] {
+  inner : T
+}</pre><div class="doc"><p>The narrow view of an <code class="inline">AsyncDriver</code>. Obtain one with <code class="inline">AsyncExecutor::new</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub(open) trait AsyncQueryExecutor {
+  async fn execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError
+  async fn query(Self, String, Array[Value]) -&gt; Array[Row] raise DbError
+  async fn query_stream(Self, String, Array[Value]) -&gt; &amp;AsyncCursor raise DbError
+  fn dialect(Self) -&gt; Dialect
+  fn capabilities(Self) -&gt; Capabilities
+}</pre><div class="doc"><p>The asynchronous counterpart of <code class="inline">QueryExecutor</code>, for a backend reached over a socket.</p></div></div>
+<div class="entry"><pre class="signature">pub(open) trait AsyncStmt {
+  async fn bind(Self, Array[Value]) -&gt; Unit raise DbError
+  async fn execute(Self) -&gt; ExecResult raise DbError
+  async fn query(Self) -&gt; Array[Row] raise DbError
+  async fn query_stream(Self) -&gt; &amp;AsyncCursor raise DbError = _
+  async fn close(Self) -&gt; Unit
+  fn sql(Self) -&gt; String
+  fn params(Self) -&gt; Array[String]
+  async fn bind_named(Self, Map[String, Value]) -&gt; Unit raise DbError = _
+}</pre><div class="doc"><p>The asynchronous counterpart of <code class="inline">Stmt</code>, for a backend reached over a socket.</p></div></div>
+<div class="entry"><pre class="signature">pub struct AsyncTxn[T] {
+  driver : T
+  mut depth : Int32
+}</pre><div class="doc"><p>The asynchronous counterpart of <code class="inline">Txn</code>, for a backend reached over a socket.</p><pre><code>let tx = @moondb.AsyncTxn::new(conn)
+tx.run(async fn(tx) {
+tx.driver().execute("INSERT INTO hero VALUES ($1, $2)", [Int(1), Text("Nova")])
+|&gt; ignore
+})</code></pre></div></div>
+<div class="entry"><pre class="signature">pub struct BufferedAsyncStmt[T] {
+  driver : T
+  text : String
+  mut params : Array[Value]
+  mut closed : Bool
+}</pre><div class="doc"><p>The statement handle <code class="inline">AsyncDriver::prepare</code> returns when the backend has nothing server-side to offer — the asynchronous twin of <code class="inline">BufferedStmt</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub struct BufferedStmt[T] {
+  driver : T
+  text : String
+  mut params : Array[Value]
+  mut closed : Bool
+}</pre><div class="doc"><p>The statement handle <code class="inline">Driver::prepare</code> returns when a driver has nothing server-side to offer: it keeps the text and the bound values and re-runs the driver's ordinary <code class="inline">execute</code>/<code class="inline">query</code> on every call. It makes the <code class="inline">Stmt</code> contract available to every existing driver without changing it.</p></div></div>
+<div class="entry"><pre class="signature">pub(all) struct Capabilities {
+  dialect : Dialect
+  prepared_statements : Bool
+  named_parameters : Bool
+  server_cursors : Bool
+  streaming_copy : Bool
+  savepoints : Bool
+  multiple_result_sets : Bool
+  unsigned_integers : Bool
+  returning : Bool
+}</pre></div>
 <div class="entry"><pre class="signature">pub(open) trait Cursor {
   fn next(Self) -&gt; Row? raise DbError
   fn close(Self) -&gt; Unit
@@ -88,6 +142,11 @@
   Closed
   Server(ServerDetail)
 }</pre><div class="doc"><p>A database-layer failure. Every fallible operation on the interface raises this one error type, so a query layer catches a single kind. Kept deliberately few so drivers can classify without a taxonomy:.</p><p>* <code class="inline">ConnectError</code> — opening, attaching, or handshaking a connection failed, or the connection dropped mid-flight. * <code class="inline">QueryError</code>   — the backend rejected a statement, or the driver hit a protocol error, without a structured server response to report. * <code class="inline">TypeError</code>    — a <code class="inline">Row</code> typed accessor was asked to read a column as a type it does not hold (e.g. <code class="inline">int</code> on a <code class="inline">Text</code>), or a column index/name that does not exist in the row. * <code class="inline">Closed</code>       — the connection or statement was used after <code class="inline">close</code>. * <code class="inline">Server</code>       — the server rejected the statement and reported a SQLSTATE and/or a numeric error code; see <code class="inline">ServerDetail</code> and <code class="inline">DbError::kind</code>.</p><p>Declared <code class="inline">pub(all)</code> so out-of-tree drivers (moonpostgres, moonmysql, …) that live in their own packages can <em>construct and raise</em> these cases — a plain <code class="inline">pub</code> suberror would let them catch a <code class="inline">DbError</code> but not build one.</p></div></div>
+<div class="entry"><pre class="signature">pub(all) enum Dialect {
+  Sqlite
+  Postgres
+  Mysql
+}</pre></div>
 <div class="entry"><pre class="signature">pub(open) trait Driver {
   fn execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError
   fn query(Self, String, Array[Value]) -&gt; Array[Row] raise DbError
@@ -97,7 +156,10 @@
   fn rollback(Self) -&gt; Unit raise DbError
   fn close(Self) -&gt; Unit
   fn ping(Self) -&gt; Bool = _
-}</pre><div class="doc"><p>The contract every database backend implements and every query layer is written against — the seam moondb exists to define. Reduced to the smallest set of operations a relational backend must offer.</p><p>## The binding contract</p><p><code class="inline">execute</code> and <code class="inline">query</code> both take <code class="inline">(sql, params)</code>. <code class="inline">sql</code> carries **positional placeholders** and <code class="inline">params</code> supplies one <code class="inline">Value</code> per placeholder, in order. A driver is expected to bind values out-of-band rather than interpolate them into the SQL text. A driver that cannot — the MySQL text protocol has no out-of-band binding until prepared statements land — has to escape for the server's actual <code class="inline">sql_mode</code>, and must say so in its own documentation.</p><p>The placeholder token itself is dialect-specific and chosen by the driver (SQLite/MySQL use <code class="inline">?</code>, PostgreSQL uses <code class="inline">$1</code>, <code class="inline">$2</code>, …); a query layer that emits SQL for a given backend uses that backend's token. moondb fixes the <em>calling convention</em> (ordered params array), not the spelling.</p><p>* <code class="inline">execute</code> runs a statement that returns no rows (INSERT/UPDATE/DELETE/DDL) and reports an <code class="inline">ExecResult</code>. * <code class="inline">query</code> runs a statement that returns rows and materialises every <code class="inline">Row</code>. * <code class="inline">begin</code> / <code class="inline">commit</code> / <code class="inline">rollback</code> bracket an explicit transaction. Nesting (savepoints), isolation levels, and read-only hints are driver concerns layered on top; the base contract is the three flat operations. * <code class="inline">close</code> releases the connection. It does not raise: closing is best-effort and idempotent.</p><p>This trait is <code class="inline">pub(open)</code> so out-of-tree drivers (moonsqlite, moonpostgres, moonmysql, …) can implement it. A future prepared-<code class="inline">Stmt</code> handle and a streaming <code class="inline">Rows</code> cursor are noted in the README roadmap; v0.1 fixes exactly the operations below so the contract everything pins to stays small and stable.</p></div></div>
+  fn prepare(Self, String) -&gt; &amp;Stmt raise DbError = _
+  fn dialect(Self) -&gt; Dialect = _
+  fn capabilities(Self) -&gt; Capabilities = _
+}</pre><div class="doc"><p>The contract every database backend implements and every query layer is written against — the seam moondb exists to define. Reduced to the smallest set of operations a relational backend must offer.</p><p>## The binding contract</p><p><code class="inline">execute</code> and <code class="inline">query</code> both take <code class="inline">(sql, params)</code>. <code class="inline">sql</code> carries **positional placeholders** and <code class="inline">params</code> supplies one <code class="inline">Value</code> per placeholder, in order. A driver is expected to bind values out-of-band rather than interpolate them into the SQL text. A driver that cannot — the MySQL text protocol has no out-of-band binding until prepared statements land — has to escape for the server's actual <code class="inline">sql_mode</code>, and must say so in its own documentation.</p><p>The placeholder token itself is dialect-specific and chosen by the driver (SQLite/MySQL use <code class="inline">?</code>, PostgreSQL uses <code class="inline">$1</code>, <code class="inline">$2</code>, …); a query layer that emits SQL for a given backend uses that backend's token. moondb fixes the <em>calling convention</em> (ordered params array), not the spelling.</p><p>* <code class="inline">execute</code> runs a statement that returns no rows (INSERT/UPDATE/DELETE/DDL) and reports an <code class="inline">ExecResult</code>. * <code class="inline">query</code> runs a statement that returns rows and materialises every <code class="inline">Row</code>. * <code class="inline">begin</code> / <code class="inline">commit</code> / <code class="inline">rollback</code> bracket an explicit transaction. Nesting (savepoints), isolation levels, and read-only hints are driver concerns layered on top; the base contract is the three flat operations. * <code class="inline">close</code> releases the connection. It does not raise: closing is best-effort and idempotent.</p><p>This trait is <code class="inline">pub(open)</code> so out-of-tree drivers (moonsqlite, moonpostgres, moonmysql, …) can implement it.</p></div></div>
 <div class="entry"><pre class="signature">pub(all) enum ErrorKind {
   Interface
   Database
@@ -112,6 +174,9 @@
   rows_affected : Int64
   last_insert_id : Int64
 }</pre><div class="doc"><p>The outcome of a non-row statement, aliased from moondb.</p></div></div>
+<div class="entry"><pre class="signature">pub struct Executor[T] {
+  inner : T
+}</pre><div class="doc"><p>The narrow view of a <code class="inline">Driver</code>: everything needed to run SQL, and nothing that owns the connection. Obtain one with <code class="inline">Driver::executor</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub(open) trait FromValue {
   fn from_value(Value) -&gt; Self raise DbError
 }</pre><div class="doc"><p>The conversions are the ones <code class="inline">Row</code>'s typed accessors make. A refusal is a <code class="inline">TypeError</code> whose message reads after "column N is", such as <code class="inline">"Text, not Int"</code>.</p></div></div>
@@ -119,8 +184,37 @@
   mut rows : Array[Row]
   mut next_id : Int64
   savepoints : Array[Int32]
+  named_savepoints : Array[(String, Int32)]
   mut closed : Bool
 }</pre><div class="doc"><p>A dependency-free, in-memory reference <code class="inline">Driver</code>. It exists for two reasons: to <em>prove the interface is implementable</em> end to end, and to give query layers built on moondb (moonorm and friends) a real test double they can run against with no database and no native backend — it compiles on every target.</p><p>It is a deliberately naive echo store, **not** a SQL engine: it does not parse <code class="inline">sql</code>. Each <code class="inline">execute</code> appends one <code class="inline">Row</code> built from the bound <code class="inline">params</code> (columns named <code class="inline">c0</code>, <code class="inline">c1</code>, …) and hands back an <code class="inline">ExecResult</code> with a monotonically increasing <code class="inline">last_insert_id</code>; each <code class="inline">query</code> returns every stored row. What it <em>does</em> model faithfully is the transaction bracket: <code class="inline">begin</code> snapshots the store, <code class="inline">rollback</code> restores it, <code class="inline">commit</code> keeps the changes — so a test can assert real rollback semantics against it.</p></div></div>
+<div class="entry"><pre class="signature">pub(all) struct Named {
+  sql : String
+  slots : Array[String]
+}</pre><div class="doc"><p>A statement whose <code class="inline">:name</code> parameters have been rewritten to the backend's own positional spelling, together with the name of the value each position takes.</p><p>The rewrite happens once, before the statement reaches the server: PostgreSQL's extended-query protocol wants <code class="inline">$1</code>, <code class="inline">$2</code>, …, SQLite and MySQL want one <code class="inline">?</code> per parameter. <code class="inline">bind</code>(#bind) turns a name-keyed argument map into the ordered array the driver expects, so a query layer writes <code class="inline">SELECT * FROM hero WHERE id = :id AND realm = :realm</code> once and runs it on all three backends.</p><p>The rewrite is a lexer, not a search-and-replace: a <code class="inline">:name</code> inside a string literal, a quoted identifier, a <code class="inline">--</code> / <code class="inline">#</code> / <code class="inline">/* */</code> comment or a PostgreSQL <code class="inline">$tag$ … $tag$</code> body is left alone, and neither <code class="inline">::</code> (a cast) nor <code class="inline">:=</code> (a named function argument) opens a parameter.</p><pre><code>test "named parameters become the backend's own spelling" {
+let q = @moondb.rewrite_named(
+"SELECT * FROM hero WHERE id = :id AND realm = :realm",
+@moondb.Dialect::Postgres,
+)
+assert_eq(q.sql, "SELECT * FROM hero WHERE id = $1 AND realm = $2")
+assert_eq(q.slots, ["id", "realm"])
+
+let m = @moondb.rewrite_named("SELECT * FROM hero WHERE id = :id", @moondb.Dialect::Mysql)
+assert_eq(m.sql, "SELECT * FROM hero WHERE id = ?")
+}</code></pre></div></div>
+<div class="entry"><pre class="signature">pub(open) trait QueryExecutor {
+  fn execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError
+  fn query(Self, String, Array[Value]) -&gt; Array[Row] raise DbError
+  fn query_stream(Self, String, Array[Value]) -&gt; &amp;Cursor raise DbError
+  fn dialect(Self) -&gt; Dialect
+  fn capabilities(Self) -&gt; Capabilities
+}</pre><div class="doc"><p>The part of a driver a query layer actually needs: run a statement, and ask what the backend is.</p><p><code class="inline">Driver</code> bundles three unrelated responsibilities — running SQL, owning a transaction, and owning a connection. A repository method, a query builder, a migration step all want the first and must not be able to <code class="inline">close</code> the connection out from under the caller that lent it to them. That is what the narrow view is for: <code class="inline">Driver::executor</code> hands out an <code class="inline">Executor</code>, and a function that takes <code class="inline">&amp;QueryExecutor</code> can run SQL and cannot end the session.</p><p>It also carries the two questions a dialect-sensitive layer asks before it emits SQL: <code class="inline">dialect</code>(#dialect) for the placeholder spelling and <code class="inline">capabilities</code>(#capabilities) for everything the backend can do beyond the base contract. A layer that must prepare statements takes the full <code class="inline">Driver</code> instead.</p><pre><code>test "a repository only needs to run SQL" {
+let db = @moondb.MockDriver::new()
+fn count(db : &amp;@moondb.QueryExecutor) -&gt; Int raise @moondb.DbError {
+db.query("SELECT 1", []).length()
+}
+assert_eq(count(@moondb.Executor::new(db)), 0)
+assert_eq(@moondb.Executor::new(db).dialect(), @moondb.Dialect::Sqlite)
+}</code></pre></div></div>
 <div class="entry"><pre class="signature">pub(all) struct Row {
   columns : Array[String]
   values : Array[Value]
@@ -134,9 +228,51 @@
   hint : String?
   severity : String?
 }</pre><div class="doc"><p>What a server-reported failure carries beyond its message: the five-character SQLSTATE, the vendor error number, and the server's severity, detail and hint. Drivers fill what their protocol supplies and leave the rest <code class="inline">None</code>. The coarse <code class="inline">ErrorKind</code> is derived from the SQLSTATE (and, for MySQL's generic <code class="inline">HY000</code>, from the errno).</p></div></div>
+<div class="entry"><pre class="signature">pub(open) trait Stmt {
+  fn bind(Self, Array[Value]) -&gt; Unit raise DbError
+  fn execute(Self) -&gt; ExecResult raise DbError
+  fn query(Self) -&gt; Array[Row] raise DbError
+  fn query_stream(Self) -&gt; &amp;Cursor raise DbError = _
+  fn close(Self) -&gt; Unit
+  fn sql(Self) -&gt; String
+  fn params(Self) -&gt; Array[String]
+  fn bind_named(Self, Map[String, Value]) -&gt; Unit raise DbError = _
+}</pre><div class="doc"><p>A statement that is prepared once and run many times with new values.</p><p><code class="inline">Driver::execute</code> and <code class="inline">Driver::query</code> prepare, bind, run and discard in one call, which is right for a one-off and wasteful for a loop: a server that has already parsed and planned a statement can execute it again with nothing but the values. A <code class="inline">Stmt</code> is that handle. <code class="inline">bind</code>(#bind) replaces the values, <code class="inline">execute</code>(#execute) and <code class="inline">query</code>(#query) run the statement, and <code class="inline">close</code>(#close) releases the server-side resources.</p><p>A handle is not a connection: it belongs to the connection that prepared it, and running it after that connection closed raises <code class="inline">Closed</code>. It is not safe to share between tasks for the same reason — one wire, one statement at a time.</p><pre><code>test "one statement, two bindings" {
+let db = @moondb.MockDriver::new()
+let stmt = db.prepare("INSERT INTO hero (id, name) VALUES (?, ?)")
+stmt.bind([@moondb.Value::Int(1), @moondb.Value::Text("Nova")])
+stmt.execute() |&gt; ignore
+stmt.bind([@moondb.Value::Int(2), @moondb.Value::Text("Iris")])
+stmt.execute() |&gt; ignore
+stmt.close()
+assert_eq(db.row_count(), 2)
+}</code></pre></div></div>
 <div class="entry"><pre class="signature">pub(open) trait ToValue {
   fn to_value(Self) -&gt; Value
 }</pre><div class="doc"><p>Implemented for the type behind each <code class="inline">Value</code> case and for <code class="inline">T?</code>, where <code class="inline">None</code> binds <code class="inline">NULL</code>. A type of the program's own implements it to be stored as one of those cases.</p></div></div>
+<div class="entry"><pre class="signature">pub struct Txn[T] {
+  driver : T
+  mut depth : Int32
+}</pre><div class="doc"><p>A transaction that nests: the outermost <code class="inline">run</code>(#run) opens a real transaction, every nested one opens a savepoint, and an error undoes only the work of the level that raised.</p><p><code class="inline">Driver::begin</code> / <code class="inline">commit</code> / <code class="inline">rollback</code> are flat, which is all a backend has to offer, but application code nests: a service method opens a transaction, calls a repository method that opens one too, and the inner failure must not discard the outer work. <code class="inline">Txn</code> closes the bracket around a body so the pairing cannot be forgotten, and derives the savepoint name from the nesting depth so two levels never collide.</p><pre><code>test "a nested body that fails keeps the outer work" {
+let db = @moondb.MockDriver::new()
+let tx = @moondb.Txn::new(db)
+tx.run(fn(tx) raise @moondb.DbError {
+tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [
+@moondb.Value::Int(1), @moondb.Value::Text("Nova"),
+])
+|&gt; ignore
+// The inner level fails; only its own work is undone.
+(try {
+tx.run(fn(_tx) raise @moondb.DbError {
+raise @moondb.QueryError("inner failed")
+})
+} catch {
+_ =&gt; ()
+})
+|&gt; ignore
+})
+assert_eq(db.row_count(), 1)
+}</code></pre></div></div>
 <div class="entry"><pre class="signature">pub(all) enum Value {
   Null
   Bool(Bool)
@@ -151,30 +287,60 @@
   Json(String)
   Array(Array[Value])
 }</pre><div class="doc"><p>The dialect-neutral value type this driver binds and decodes. Aliased so the wire code reads <code class="inline">Value</code> rather than <code class="inline">@moondb.Value</code> throughout; the enum constructors (<code class="inline">Int</code>, <code class="inline">Text</code>, …) are still spelled <code class="inline">@moondb.Int</code> where a value is built.</p></div></div>
-<h3>Functions &amp; methods <span class="count">58</span></h3>
+<h3>Functions &amp; methods <span class="count">93</span></h3>
 <div class="entry"><pre class="signature">pub fn ArrayCursor::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">Cursor</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn ArrayCursor::new(Array[Row]) -&gt; Self</pre><div class="doc"><p>A cursor positioned before the first of <code class="inline">rows</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn ArrayCursor::next(Self) -&gt; Row? raise DbError</pre><div class="doc"><p><code class="inline">Cursor</code>'s <code class="inline">next</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn AsyncArrayCursor::new(Array[Row]) -&gt; Self</pre><div class="doc"><p>A cursor positioned before the first of <code class="inline">rows</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : AsyncDriver] AsyncExecutor::capabilities(Self[T]) -&gt; Capabilities</pre><div class="doc"><p>What the driver underneath can do beyond the base contract.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : AsyncDriver] AsyncExecutor::dialect(Self[T]) -&gt; Dialect</pre><div class="doc"><p>The SQL dialect of the driver underneath.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] AsyncExecutor::driver(Self[T]) -&gt; T</pre><div class="doc"><p>The driver underneath.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] AsyncExecutor::new(T) -&gt; Self[T]</pre><div class="doc"><p>The narrow view over <code class="inline">inner</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] AsyncTxn::depth(Self[T]) -&gt; Int32</pre><div class="doc"><p>How many bodies are currently open, zero when none is.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] AsyncTxn::driver(Self[T]) -&gt; T</pre><div class="doc"><p>The connection this handle opens transactions on.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] AsyncTxn::new(T) -&gt; Self[T]</pre><div class="doc"><p>An async transaction handle over <code class="inline">driver</code>, at depth zero and not yet open.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] BufferedAsyncStmt::new(T, String) -&gt; Self[T]</pre><div class="doc"><p>A buffered async handle over <code class="inline">driver</code> for <code class="inline">sql</code>, with no values bound yet.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] BufferedStmt::new(T, String) -&gt; Self[T]</pre><div class="doc"><p>A buffered handle over <code class="inline">driver</code> for <code class="inline">sql</code>, with no values bound yet.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Capabilities::count(Self) -&gt; Int32</pre><div class="doc"><p>The number of capabilities the backend has, which is the useful shape for a feature matrix in a test: a preset that loses one silently stops adding up.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Capabilities::for_dialect(Dialect) -&gt; Self</pre><div class="doc"><p>The capabilities of the driver moondb ships for <code class="inline">dialect</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Capabilities::is_for(Self, Dialect) -&gt; Bool</pre><div class="doc"><p>Whether this report describes <code class="inline">dialect</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn classify_sqlstate(String) -&gt; ErrorKind</pre><div class="doc"><p>Classify a five-character SQLSTATE into an <code class="inline">ErrorKind</code> using the class (its first two characters), per the SQL:2016 / PostgreSQL table of class codes. Unknown, empty, or short states fall back to <code class="inline">Database</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn DbError::code(Self) -&gt; Int32?</pre><div class="doc"><p>The vendor error number the server reported (MySQL's errno), or <code class="inline">None</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn DbError::kind(Self) -&gt; ErrorKind</pre><div class="doc"><p>The failure class of any <code class="inline">DbError</code>, including the ones that carry no server response. <code class="inline">ConnectError</code> is operational (a retry may succeed); a plain <code class="inline">QueryError</code> is a generic database failure; a <code class="inline">TypeError</code> or <code class="inline">Closed</code> is interface misuse; a structured <code class="inline">Server</code> reports the class its SQLSTATE implies.</p></div></div>
 <div class="entry"><pre class="signature">pub fn DbError::sqlstate(Self) -&gt; String?</pre><div class="doc"><p>The five-character SQLSTATE the server reported, or <code class="inline">None</code> when the failure did not come from a structured server response.</p></div></div>
 <div class="entry"><pre class="signature">pub fn DbError::to_string(Self) -&gt; String</pre><div class="doc"><p>A one-line rendering of the error, e.g. <code class="inline">QueryError: no such table: hero</code> or <code class="inline">ServerError: relation "hero" does not exist [42P01]</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Dialect::name(Self) -&gt; String</pre><div class="doc"><p>The dialect's short name in lower case — the spelling used in configuration and in a driver's <code class="inline">Capabilities</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Dialect::parse(String) -&gt; Self?</pre><div class="doc"><p>Look a dialect up by its short name, ignoring case. Accepts the usual aliases (<code class="inline">postgresql</code>, <code class="inline">pg</code>, <code class="inline">mariadb</code>) because a configuration file is written by a person, not by this module.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Dialect::placeholder(Self, Int32) -&gt; String</pre><div class="doc"><p>The placeholder for the <code class="inline">n</code>-th bound parameter (1-based).</p><p>PostgreSQL's extended-query protocol numbers parameters, so each one is spelled <code class="inline">$n</code>; SQLite and MySQL bind positionally and spell every one <code class="inline">?</code>. The index is ignored by the two positional dialects, which is why a builder can call this unconditionally.</p></div></div>
 <div class="entry"><pre class="signature">pub fn drain(&amp;Cursor) -&gt; Array[Row] raise DbError</pre><div class="doc"><p>Drain a cursor into an array — the inverse of streaming, for callers that do want every row (and for asserting a cursor yields exactly what <code class="inline">query</code> would).</p></div></div>
 <div class="entry"><pre class="signature">pub fn ErrorKind::to_string(Self) -&gt; String</pre><div class="doc"><p>The lowercase name of the class, for logs and test output.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : Driver] Executor::capabilities(Self[T]) -&gt; Capabilities</pre><div class="doc"><p>What the driver underneath can do beyond the base contract.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : Driver] Executor::dialect(Self[T]) -&gt; Dialect</pre><div class="doc"><p>The SQL dialect of the driver underneath.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] Executor::driver(Self[T]) -&gt; T</pre><div class="doc"><p>The driver underneath, for the caller that does own the connection.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : Driver] Executor::execute(Self[T], String, Array[Value]) -&gt; ExecResult raise DbError</pre><div class="doc"><p>Run a non-row statement. Present as a plain method as well as a trait method so the view reads like the driver it wraps.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] Executor::new(T) -&gt; Self[T]</pre><div class="doc"><p>The narrow view over <code class="inline">inner</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : Driver] Executor::query(Self[T], String, Array[Value]) -&gt; Array[Row] raise DbError</pre><div class="doc"><p>Run a row-returning statement and materialise every row.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : Driver] Executor::query_stream(Self[T], String, Array[Value]) -&gt; &amp;Cursor raise DbError</pre><div class="doc"><p>Stream a row-returning statement's rows.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::begin(Self) -&gt; Unit raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">begin</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn MockDriver::capabilities(Self) -&gt; Capabilities</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::commit(Self) -&gt; Unit raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">commit</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn MockDriver::dialect(Self) -&gt; Dialect</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::in_transaction(Self) -&gt; Bool</pre><div class="doc"><p>Whether a transaction is currently open (at least one un-committed <code class="inline">begin</code>).</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::is_closed(Self) -&gt; Bool</pre><div class="doc"><p>Whether the connection has been closed.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::new() -&gt; Self</pre><div class="doc"><p>A fresh, empty mock connection.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::ping(Self) -&gt; Bool</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">ping</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn MockDriver::prepare(Self, String) -&gt; &amp;Stmt raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">prepare</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::query(Self, String, Array[Value]) -&gt; Array[Row] raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::query_stream(Self, String, Array[Value]) -&gt; &amp;Cursor raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::rollback(Self) -&gt; Unit raise DbError</pre><div class="doc"><p><code class="inline">Driver</code>'s <code class="inline">rollback</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MockDriver::row_count(Self) -&gt; Int32</pre><div class="doc"><p>How many rows the store currently holds. A test-facing helper, not part of the <code class="inline">Driver</code> contract.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Named::arity(Self) -&gt; Int32</pre><div class="doc"><p>How many values the statement binds.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Named::bind(Self, Map[String, Value]) -&gt; Array[Value] raise DbError</pre><div class="doc"><p>Turn a name-keyed argument map into the positional array the statement binds. A missing name raises a <code class="inline">TypeError</code> naming the parameter; a key the statement never mentions raises one too, so a typo in a repository method is caught at the call rather than silently ignored.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Named::is_named(Self) -&gt; Bool</pre><div class="doc"><p>Whether the statement takes named parameters at all.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Named::names(Self) -&gt; Array[String]</pre><div class="doc"><p>The distinct parameter names, in first-use order.</p></div></div>
+<div class="entry"><pre class="signature">pub fn rewrite_named(String, Dialect) -&gt; Named raise DbError</pre><div class="doc"><p>Rewrite <code class="inline">:name</code> parameters in <code class="inline">sql</code> into <code class="inline">dialect</code>'s positional spelling.</p><p>A statement may use either <code class="inline">:name</code> or positional <code class="inline">?</code>, never both; mixing them raises a <code class="inline">QueryError</code> naming the offset, because the two conventions disagree about what the caller's array means.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Row::array(Self, Int32) -&gt; Array[Value] raise DbError</pre><div class="doc"><p>Read column <code class="inline">idx</code> as an SQL array. Raises <code class="inline">TypeError</code> unless the cell is <code class="inline">Array</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Row::array_by(Self, String) -&gt; Array[Value] raise DbError</pre><div class="doc"><p>Read the column named <code class="inline">name</code> as an SQL array.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Row::blob(Self, Int32) -&gt; Bytes raise DbError</pre><div class="doc"><p>Read column <code class="inline">idx</code> as an opaque blob. Raises <code class="inline">TypeError</code> unless the cell is <code class="inline">Blob</code>.</p></div></div>
@@ -205,6 +371,11 @@
 <div class="entry"><pre class="signature">pub fn Row::uuid(Self, Int32) -&gt; Bytes raise DbError</pre><div class="doc"><p>Read column <code class="inline">idx</code> as the raw bytes of a UUID. Raises <code class="inline">TypeError</code> unless the cell is <code class="inline">Uuid</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Row::uuid_by(Self, String) -&gt; Bytes raise DbError</pre><div class="doc"><p>Read the column named <code class="inline">name</code> as UUID bytes.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Row::width(Self) -&gt; Int32</pre><div class="doc"><p>The number of columns in the row.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] Txn::depth(Self[T]) -&gt; Int32</pre><div class="doc"><p>How many bodies are currently open, zero when none is.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] Txn::driver(Self[T]) -&gt; T</pre><div class="doc"><p>The connection this handle opens transactions on.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] Txn::is_open(Self[T]) -&gt; Bool</pre><div class="doc"><p>Whether a body is currently open.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T] Txn::new(T) -&gt; Self[T]</pre><div class="doc"><p>A transaction handle over <code class="inline">driver</code>, at depth zero and not yet open.</p></div></div>
+<div class="entry"><pre class="signature">pub fn[T : Driver] Txn::run(Self[T], (Self[T]) -&gt; Unit raise DbError) -&gt; Unit raise DbError</pre><div class="doc"><p>Run <code class="inline">body</code> inside a transaction, or inside a savepoint when a transaction is already open. Returning normally commits (or releases the savepoint); raising rolls back (or rolls back to the savepoint) and re-raises the original error.</p><p>A body that catches an inner failure and carries on keeps the outer work, which is the point of the savepoint: only the level that failed is undone.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Value::from_value(Self) -&gt; Self raise DbError</pre><div class="doc"><p><code class="inline">FromValue</code>'s <code class="inline">from_value</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Value::is_null(Self) -&gt; Bool</pre><div class="doc"><p>Whether this value is SQL <code class="inline">NULL</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn Value::json_text(Self) -&gt; String</pre><div class="doc"><p>Render this value as JSON text. Scalars map to their JSON counterparts, text is quoted and escaped, <code class="inline">Time</code>/<code class="inline">Numeric</code> become strings, <code class="inline">Json</code> is embedded as-is, and <code class="inline">Array</code> becomes a JSON array. Drivers use this to bind array and JSON values on protocols that carry parameters as text.</p></div></div>
@@ -267,30 +438,44 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
 <section class="section" id="moonsqlite">
 <p class="folio">moonbitstack/moonsqlite</p>
 <h2>moonsqlite</h2>
-<h3>Types <span class="count">1</span></h3>
+<h3>Types <span class="count">2</span></h3>
 <div class="entry"><pre class="signature">pub struct SqliteDriver {
   handle : Int64
   mut closed : Bool
 }</pre><div class="doc"><p>A live connection to a SQLite database. Open it with <code class="inline">SqliteDriver::open</code>; it implements <code class="inline">@moondb.Driver</code>, so a moondb query layer can drive it directly. The opaque <code class="inline">sqlite3*</code> is carried as its pointer bits in <code class="inline">handle</code>.</p></div></div>
-<h3>Functions &amp; methods <span class="count">13</span></h3>
+<div class="entry"><pre class="signature">pub struct SqliteStmt {
+  driver : SqliteDriver
+  st : Int64
+  text : String
+  slots : Array[String]
+  cols : Array[String]
+  mut closed : Bool
+}</pre><div class="doc"><p>A statement SQLite prepares once and runs many times.</p><p><code class="inline">prepare</code> compiles the SQL into a <code class="inline">sqlite3_stmt</code> and keeps it alive; <code class="inline">bind</code> resets the compiled program and binds a fresh set of values, so a loop over a thousand rows pays for parsing and planning once. <code class="inline">close</code> finalises the statement. A <code class="inline">:name</code> statement is rewritten to <code class="inline">?</code> at prepare time and remembers the slot names, so <code class="inline">bind_named</code> works without the caller numbering anything.</p></div></div>
+<h3>Functions &amp; methods <span class="count">19</span></h3>
 <div class="entry"><pre class="signature">pub fn SqliteCursor::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.Cursor</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteCursor::next(Self) -&gt; @moondb.Row? raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Cursor</code>'s <code class="inline">next</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::begin(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">begin</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqliteDriver::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::commit(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">commit</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqliteDriver::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::exec_script(Self, String) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p>Run a semicolon-separated script (e.g. a schema DDL block) in one call. Unlike <code class="inline">execute</code>, this uses SQLite's multi-statement <code class="inline">exec</code> path and binds no parameters. Raises <code class="inline">@moondb.QueryError</code> with SQLite's message on failure.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::execute(Self, String, Array[@moondb.Value]) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::is_closed(Self) -&gt; Bool</pre><div class="doc"><p>Whether <code class="inline">close</code> has been called. Once closed, every statement raises <code class="inline">@moondb.Closed</code> rather than touching the freed <code class="inline">sqlite3*</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::open(String) -&gt; Self raise @moondb.DbError</pre><div class="doc"><p>Open (or create) the database at <code class="inline">path</code>. Use <code class="inline">":memory:"</code> for a private in-memory database. Raises <code class="inline">@moondb.ConnectError</code> if the file cannot be opened.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::ping(Self) -&gt; Bool</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">ping</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqliteDriver::prepare(Self, String) -&gt; &amp;@moondb.Stmt raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">prepare</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqliteDriver::prepare_stmt(Self, String) -&gt; SqliteStmt raise @moondb.DbError</pre><div class="doc"><p>Compile <code class="inline">sql</code> into a reusable statement. A statement using <code class="inline">:name</code> parameters is rewritten to SQLite's <code class="inline">?</code> spelling first.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::query(Self, String, Array[@moondb.Value]) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::query_stream(Self, String, Array[@moondb.Value]) -&gt; &amp;@moondb.Cursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn SqliteDriver::rollback(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">rollback</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqliteStmtCursor::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.Cursor</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqliteStmtCursor::next(Self) -&gt; @moondb.Row? raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Cursor</code>'s <code class="inline">next</code>, callable on the value directly.</p></div></div>
 </section>
 <section class="section" id="moonpostgres">
 <p class="folio">moonbitstack/moonpostgres</p>
 <h2>moonpostgres</h2>
-<h3>Types <span class="count">4</span></h3>
+<h3>Types <span class="count">8</span></h3>
 <div class="entry"><pre class="signature">pub struct PgConn {
   stream : PgWire
   host : String
@@ -303,6 +488,23 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
   statements : Map[String, String]
   mut next_stmt : Int32
 }</pre><div class="doc"><p>A live connection to a PostgreSQL backend, already past the startup handshake and sitting at <code class="inline">ReadyForQuery</code>. Runs the v3 frontend/backend protocol over a single <code class="inline">@socket.Tcp</code>. Not safe for concurrent use by multiple tasks: one statement must complete (drain to <code class="inline">ReadyForQuery</code>) before the next begins, as the wire protocol is a strict request/response pipeline per connection.</p></div></div>
+<div class="entry"><pre class="signature">pub struct PgCopyIn {
+  conn : PgConn
+  mut done : Bool
+  mut failed : Bool
+}</pre><div class="doc"><p>A <code class="inline">COPY … FROM STDIN</code> in progress: <code class="inline">write_chunk</code>(#write_chunk) pushes pieces as they are produced and <code class="inline">finish</code>(#finish) closes the stream and reports what the server did with it.</p><p>The stream owns the connection until <code class="inline">finish</code> (or <code class="inline">fail</code>(#fail)); writing after either is a <code class="inline">QueryError</code>. Chunks are passed through as COPY data messages, so a caller can stream a file of any size without materialising it.</p></div></div>
+<div class="entry"><pre class="signature">pub struct PgCopyOut {
+  conn : PgConn
+  mut done : Bool
+  mut rows : Int64
+}</pre><div class="doc"><p>A <code class="inline">COPY … TO STDOUT</code> in progress: the server sends the data in pieces and <code class="inline">read_chunk</code>(#read_chunk) hands them over one at a time, so a table or a query result larger than memory can be written straight to a file or a socket.</p><p>The stream owns the connection's single-response pipeline until it ends: read it to <code class="inline">None</code> (or <code class="inline">cancel</code>(#cancel) it) before the next statement. The chunks are the server's own framing — COPY text rows are newline-terminated, CSV rows likewise, binary rows are length-prefixed — so a caller writes them out verbatim.</p></div></div>
+<div class="entry"><pre class="signature">pub struct PgCursor {
+  conn : PgConn
+  name : String
+  batch : Int32
+  mut exhausted : Bool
+  mut closed : Bool
+}</pre><div class="doc"><p>A server-side cursor: <code class="inline">DECLARE … CURSOR</code> opens it inside the current transaction and <code class="inline">next_batch</code>(#next_batch) pulls at most <code class="inline">batch</code> rows per round trip.</p><p>This is the cursor for a result too large to hold, and it is different from <code class="inline">PgRowStream</code>, which streams one statement's response: the server owns the position, so the connection is free between fetches, and the rows already read are never resent. It requires an open transaction — a cursor declared outside one is closed by the implicit commit at the end of the statement.</p></div></div>
 <div class="entry"><pre class="signature">pub struct PgDriver {
   host : String
   port : Int32
@@ -316,13 +518,24 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
   mut col_oids : Array[Int32]
   mut done : Bool
 }</pre><div class="doc"><p>A forward-only cursor that reads a query's rows off the wire on demand instead of buffering them, the streaming counterpart to <code class="inline">query</code>, for results too large to materialise (asyncpg's cursor. It is bound to its <code class="inline">PgConn</code>, which is a single-statement pipeline: the stream must be drained (<code class="inline">next</code> returns <code class="inline">None</code>) or [<code class="inline">close</code>d](PgRowStream::close) before another statement runs on that connection.</p></div></div>
+<div class="entry"><pre class="signature">pub struct PgStmt {
+  conn : PgConn
+  name : String
+  key : String
+  translated : String
+  text : String
+  slots : Array[String]
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}</pre><div class="doc"><p>A statement PostgreSQL prepares once, on the server, and runs many times.</p><p><code class="inline">prepare</code> sends <code class="inline">Parse</code> for the statement's text under a generated name, so the parse and the plan survive between calls; each <code class="inline">execute</code>/<code class="inline">query</code> sends only <code class="inline">Bind</code>/<code class="inline">Describe</code>/<code class="inline">Execute</code> with new values. The name comes from the connection's statement cache keyed by the SQL text, so preparing the same text twice reuses one server-side statement rather than allocating a second.</p><p>A <code class="inline">:name</code> statement is preprocessed here — rewritten to <code class="inline">$1</code>, <code class="inline">$2</code>, … and the slot names remembered — which is what makes <code class="inline">bind_named</code> work without the caller numbering the parameters. A statement written with <code class="inline">?</code> is translated the same way <code class="inline">execute</code> translates it, and a bare <code class="inline">?</code> that is the JSONB operator is left alone.</p></div></div>
 <div class="entry"><pre class="signature">pub struct PgWire {
   // private fields
 }</pre><div class="doc"><p>The byte channel a connection speaks the PostgreSQL v3 protocol over.</p><p>A real connection uses a socket — plain, or a TLS session layered on one. The protocol code above it, though, only ever needs three things: read exactly <em>n</em> bytes, write these bytes, close. Pulling that out of <code class="inline">PgConn</code> is what lets the state machine (statement sequencing, the streaming guard, error draining, COPY, notifications) be tested against a scripted peer with no machine and no server behind it: <code class="inline">pipe</code>(PgWire::pipe) hands it one end of an in-memory pipe pair and the test plays the server on the other.</p><p>It is an enum rather than a trait object because the two transports have different concrete types already (<code class="inline">@tcp.Conn</code>, <code class="inline">@io.PipeRead</code> + <code class="inline">@io.PipeWrite</code>) and a closed set keeps the dispatch a match with no allocation.</p></div></div>
-<h3>Functions &amp; methods <span class="count">57</span></h3>
+<h3>Functions &amp; methods <span class="count">61</span></h3>
 <div class="entry"><pre class="signature">pub fn build_bind(Array[@moondb.Value]) -&gt; Bytes</pre><div class="doc"><p>Bind ('B'): bind <code class="inline">params</code> (all text format) to the unnamed statement, producing the unnamed portal, and request all result columns in text format.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_bind_named(String, String, Array[@moondb.Value]) -&gt; Bytes</pre><div class="doc"><p>Bind ('B') <code class="inline">params</code> to a named (or unnamed) prepared statement, producing a named (or unnamed) portal. All parameters and result columns use text format.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_cancel_request(Int32, Int32) -&gt; Bytes</pre><div class="doc"><p>CancelRequest: Int32 length <code class="inline">16</code>, Int32 request code <code class="inline">80877102</code>, then the backend process id and secret key from <code class="inline">BackendKeyData</code>. Sent on a <em>new</em> connection to ask the server to cancel the query running on the old one.</p></div></div>
+<div class="entry"><pre class="signature">pub fn build_close_statement(String) -&gt; Bytes</pre><div class="doc"><p>Close ('C') for a named prepared statement: the server frees it and answers <code class="inline">CloseComplete</code>. A <code class="inline">Sync</code> follows so the message reaches a ready state on its own.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_copy_data(Bytes) -&gt; Bytes</pre><div class="doc"><p>CopyData ('d'): one chunk of COPY data.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_copy_done() -&gt; Bytes</pre><div class="doc"><p>CopyDone ('c'): the client has sent every COPY chunk.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_copy_fail(String) -&gt; Bytes</pre><div class="doc"><p>CopyFail ('f'): abort a COPY FROM STDIN with a message.</p></div></div>
@@ -341,7 +554,7 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
 <div class="entry"><pre class="signature">pub fn concat_bytes(Bytes, Bytes) -&gt; Bytes</pre><div class="doc"><p>Concatenate two byte strings. A small helper the MD5 auth path and message framing lean on; MoonBit's <code class="inline">Bytes</code> is immutable so this allocates once.</p></div></div>
 <div class="entry"><pre class="signature">pub fn count_placeholders(String) -&gt; Int32</pre><div class="doc"><p>The number of <code class="inline">?</code> placeholders <code class="inline">translate_placeholders</code> would consume — the count of parameters a statement expects. Shares the same scanner discipline so <code class="inline">??</code> escapes and quoted/comment spans do not count.</p></div></div>
 <div class="entry"><pre class="signature">pub fn decode_bytea(String) -&gt; Bytes</pre><div class="doc"><p>Decode PostgreSQL <code class="inline">bytea</code> hex text (<code class="inline">\xDEADBEEF</code>) back to raw bytes. A value not in hex form (legacy escape format) rides back as its UTF-8 bytes.</p></div></div>
-<div class="entry"><pre class="signature">pub fn decode_value(Int32, Bool, String) -&gt; @moondb.Value</pre><div class="doc"><p>Decode a text-format result cell (<code class="inline">raw</code>, already UTF-8) tagged with its column <code class="inline">oid</code> into a <code class="inline">Value</code>. <code class="inline">is_null</code> marks a wire <code class="inline">NULL</code> (length <code class="inline">-1</code>), which decodes to <code class="inline">Null</code> regardless of type. Numeric and boolean OIDs decode to their typed cases; everything else — including <code class="inline">numeric</code>, dates, and unknown OIDs — rides back as <code class="inline">Text</code>, exactly the dialect-neutral contract moondb documents (temporal/<code class="inline">numeric</code> typing is a roadmap item).</p></div></div>
+<div class="entry"><pre class="signature">pub fn decode_value(Int32, Bool, String) -&gt; @moondb.Value</pre><div class="doc"><p>Decode a text-format result cell (<code class="inline">raw</code>, already UTF-8) tagged with its column <code class="inline">oid</code> into a <code class="inline">Value</code>. <code class="inline">is_null</code> marks a wire <code class="inline">NULL</code> (length <code class="inline">-1</code>), which decodes to <code class="inline">Null</code> regardless of type. Boolean, integer, floating-point, <code class="inline">numeric</code>, <code class="inline">uuid</code>, <code class="inline">json</code>/<code class="inline">jsonb</code> and the date/time OIDs decode to their typed cases; an OID the table does not know — an enum or a domain — rides back as <code class="inline">Text</code>, exactly the dialect-neutral contract moondb documents.</p></div></div>
 <div class="entry"><pre class="signature">pub fn encode_param(@moondb.Value) -&gt; Bytes?</pre><div class="doc"><p>Encode a bound parameter to its text-format bytes, or <code class="inline">None</code> for SQL <code class="inline">NULL</code> (which the Bind message sends as a length of <code class="inline">-1</code>). Binding is out-of-band — the value never touches the SQL string — so this is the injection-safe path.</p><p>* integers / doubles / bools render to their canonical PostgreSQL text literals (<code class="inline">t</code>/<code class="inline">f</code> for booleans); * <code class="inline">Text</code> passes through UTF-8; * <code class="inline">Blob</code> uses the <code class="inline">bytea</code> hex format (<code class="inline">\x</code> + lowercase hex), which the server accepts for a text-format <code class="inline">bytea</code> parameter.</p></div></div>
 <div class="entry"><pre class="signature">pub const OID_BOOL : Int32 = 16</pre><div class="doc"><p>The <code class="inline">pg_type</code> OID of <code class="inline">bool</code>, as a column description reports it.</p></div></div>
 <div class="entry"><pre class="signature">pub const OID_BYTEA : Int32 = 17</pre><div class="doc"><p>The <code class="inline">pg_type</code> OID of <code class="inline">bytea</code>, as a column description reports it.</p></div></div>
@@ -364,9 +577,12 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
 <div class="entry"><pre class="signature">pub fn parse_int64(String) -&gt; Int64?</pre><div class="doc"><p>Parse a base-10 <code class="inline">Int64</code>, or <code class="inline">None</code> on any non-digit (after an optional sign).</p></div></div>
 <div class="entry"><pre class="signature">pub fn pg_md5_password(String, String, Bytes) -&gt; String</pre><div class="doc"><p><code class="inline">"md5" + hex(md5(hex(md5(password + user)) + salt))</code>.</p><p>It is what the server asks for and nothing else uses it, which is why the shape is stated rather than assembled from parts a caller might reorder.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgConn::backend_pid(Self) -&gt; Int32</pre><div class="doc"><p>The backend process id, from BackendKeyData.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgConn::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgConn::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgConn::is_closed(Self) -&gt; Bool</pre><div class="doc"><p>Whether <code class="inline">close</code>(PgConn::close) has been called. A closed connection refuses further statements with <code class="inline">@moondb.Closed</code>.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgConn::is_streaming(Self) -&gt; Bool</pre><div class="doc"><p>Whether a <code class="inline">PgRowStream</code> is still outstanding. While one is, this connection refuses new statements — the wire is a single-statement pipeline — until the stream is drained or [closed](PgRowStream::close).</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgConn::parameter(Self, String) -&gt; String?</pre><div class="doc"><p>A session parameter the server reported (<code class="inline">server_version</code>, <code class="inline">client_encoding</code>, <code class="inline">TimeZone</code>, …), or <code class="inline">None</code> if it has not been reported.</p></div></div>
+<div class="entry"><pre class="signature">pub fn PgCopyOut::rows(Self) -&gt; Int64</pre><div class="doc"><p>How many rows the finished <code class="inline">COPY</code> reported, or <code class="inline">0</code> while it is still running.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgDriver::new(host~ : String, port? : Int32, user~ : String, password? : String, database~ : String) -&gt; Self</pre><div class="doc"><p>Build a connection descriptor. Does not connect: PostgreSQL I/O is async, so the connection is opened by <code class="inline">connect</code>(PgDriver::connect) inside an event loop.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgWire::close(Self) -&gt; Unit</pre><div class="doc"><p>Close the channel. Idempotent at the transport level, so a double close after a failed handshake is harmless.</p></div></div>
 <div class="entry"><pre class="signature">pub fn PgWire::pipe(@io.PipeRead, @io.PipeWrite) -&gt; Self</pre><div class="doc"><p>Wrap the client end of an in-memory pipe pair: <code class="inline">from_server</code> is where the peer's writes arrive, <code class="inline">to_server</code> is where this connection's writes go. Used by the offline protocol tests; a live connection never takes this path.</p></div></div>
@@ -427,10 +643,10 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
   num_columns : Int32
   num_params : Int32
 }</pre><div class="doc"><p>The server's reply to COM_STMT_PREPARE: the statement handle and how many parameters and result columns the statement has.</p></div></div>
-<h3>Functions &amp; methods <span class="count">61</span></h3>
+<h3>Functions &amp; methods <span class="count">63</span></h3>
 <div class="entry"><pre class="signature">pub fn bind_params(String, Array[@moondb.Value], mode? : QuoteMode) -&gt; Bytes raise MysqlError</pre><div class="doc"><p>Substitute the ordered <code class="inline">params</code> for the <code class="inline">?</code> placeholders in <code class="inline">sql</code>, producing the UTF-8 query bytes a <code class="inline">COM_QUERY</code> carries.</p><p>The text protocol has no out-of-band parameter binding — that arrives with prepared statements (<code class="inline">COM_STMT_PREPARE</code>, binary protocol) in a later round — so values are rendered as escaped literals here. The scanner tracks single-, double-, and backtick-quoted spans (honouring backslash escapes) so a literal <code class="inline">?</code> inside a string or identifier is never mistaken for a placeholder, and it raises when the placeholder and parameter counts disagree.</p></div></div>
-<div class="entry"><pre class="signature">pub fn build_handshake_response(Handshake, String, Bytes, String, ssl? : Bool) -&gt; Bytes raise MysqlError</pre><div class="doc"><p>Build the client's HandshakeResponse41 payload for <code class="inline">user</code>/<code class="inline">password</code>/<code class="inline">database</code>.</p><p>mysql_native_password and caching_sha2_password (MySQL 8's default, fast-path scramble here and full auth driven in <code class="inline">MysqlConn::connect</code>) are both handled directly. For any other plugin the client advertises mysql_native_password and sends a native token, so a native-capable account authenticates and otherwise the server drives an AuthSwitchRequest the connection layer answers (native or caching_sha2) or rejects. Only a server that requires a non-native plugin <em>and</em> does not offer pluggable auth is rejected here. client_ed25519 remains on the README roadmap.</p></div></div>
-<div class="entry"><pre class="signature">pub fn build_ssl_request(String) -&gt; Bytes</pre><div class="doc"><p>SSLRequest: Int32 length <code class="inline">8</code>, Int32 request code <code class="inline">80877103</code>. Sent before the startup message; the server answers a single byte — <code class="inline">S</code> to begin a TLS handshake, <code class="inline">N</code> to continue in cleartext.</p></div></div>
+<div class="entry"><pre class="signature">pub fn build_handshake_response(Handshake, String, Bytes, String, ssl? : Bool, charset? : Int32) -&gt; Bytes raise MysqlError</pre><div class="doc"><p>Build the client's HandshakeResponse41 payload for <code class="inline">user</code>/<code class="inline">password</code>/<code class="inline">database</code>.</p><p>mysql_native_password and caching_sha2_password (MySQL 8's default, fast-path scramble here and full auth driven in <code class="inline">MysqlConn::connect</code>) are both handled directly. For any other plugin the client advertises mysql_native_password and sends a native token, so a native-capable account authenticates and otherwise the server drives an AuthSwitchRequest the connection layer answers (native or caching_sha2) or rejects. Only a server that requires a non-native plugin <em>and</em> does not offer pluggable auth is rejected here. client_ed25519 is answered by the connection layer when MariaDB switches to it.</p></div></div>
+<div class="entry"><pre class="signature">pub fn build_ssl_request(String, charset? : Int32) -&gt; Bytes</pre><div class="doc"><p>SSLRequest: Int32 length <code class="inline">8</code>, Int32 request code <code class="inline">80877103</code>. Sent before the startup message; the server answers a single byte — <code class="inline">S</code> to begin a TLS handshake, <code class="inline">N</code> to continue in cleartext.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_stmt_close(Int32) -&gt; Bytes</pre><div class="doc"><p>COM_STMT_CLOSE (<code class="inline">0x19</code>): the statement id; the server answers nothing.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_stmt_execute(Int32, Array[@moondb.Value]) -&gt; Bytes</pre><div class="doc"><p>COM_STMT_EXECUTE (<code class="inline">0x17</code>) for statement <code class="inline">id</code>, binding <code class="inline">params</code> out-of-band. Every non-NULL parameter is declared as <code class="inline">VAR_STRING</code> (or <code class="inline">BLOB</code> for bytes) and sent length-encoded; the server coerces it to the column type. The NULL bitmap uses bit <code class="inline">i</code> for parameter <code class="inline">i</code>, LSB first.</p></div></div>
 <div class="entry"><pre class="signature">pub fn build_stmt_prepare(String) -&gt; Bytes</pre><div class="doc"><p>COM_STMT_PREPARE (<code class="inline">0x16</code>): the SQL text follows the command byte.</p></div></div>
@@ -441,6 +657,8 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
 <div class="entry"><pre class="signature">pub let client_connect_with_db : Int32</pre><div class="doc"><p>The <code class="inline">CLIENT_CONNECT_WITH_DB</code> capability flag of the connection handshake.</p></div></div>
 <div class="entry"><pre class="signature">pub let client_long_flag : Int32</pre><div class="doc"><p>The <code class="inline">CLIENT_LONG_FLAG</code> capability flag of the connection handshake.</p></div></div>
 <div class="entry"><pre class="signature">pub let client_long_password : Int32</pre><div class="doc"><p>The <code class="inline">CLIENT_LONG_PASSWORD</code> capability flag of the connection handshake.</p></div></div>
+<div class="entry"><pre class="signature">pub let client_multi_results : Int32</pre><div class="doc"><p><code class="inline">CLIENT_MULTI_RESULTS</code>: one statement may answer with more than one result set — what a stored procedure's <code class="inline">CALL</code> needs. Without it the server rejects a procedure that returns rows (<code class="inline">ER_SP_BADSELECT</code>).</p></div></div>
+<div class="entry"><pre class="signature">pub let client_multi_statements : Int32</pre><div class="doc"><p><code class="inline">CLIENT_MULTI_STATEMENTS</code>: one <code class="inline">COM_QUERY</code> may carry several <code class="inline">;</code>-separated statements.</p></div></div>
 <div class="entry"><pre class="signature">pub let client_plugin_auth : Int32</pre><div class="doc"><p>The <code class="inline">CLIENT_PLUGIN_AUTH</code> capability flag of the connection handshake.</p></div></div>
 <div class="entry"><pre class="signature">pub let client_protocol_41 : Int32</pre><div class="doc"><p>The <code class="inline">CLIENT_PROTOCOL_41</code> capability flag of the connection handshake.</p></div></div>
 <div class="entry"><pre class="signature">pub let client_secure_connection : Int32</pre><div class="doc"><p>The <code class="inline">CLIENT_SECURE_CONNECTION</code> capability flag of the connection handshake.</p></div></div>
@@ -493,7 +711,7 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
 <section class="section" id="moonmysql-client">
 <p class="folio">moonbitstack/moonmysql/client</p>
 <h2>client</h2>
-<h3>Types <span class="count">3</span></h3>
+<h3>Types <span class="count">4</span></h3>
 <div class="entry"><pre class="signature">pub struct MysqlConn {
   stream : @tcp.Conn
   mut seq : Int32
@@ -516,15 +734,28 @@ let rows = pool.with_conn(conn =&gt; conn.query("SELECT 1", []))</code></pre></d
   mut pending : Bytes?
   mut done : Bool
 }</pre><div class="doc"><p>A forward-only cursor that reads a query's rows off the wire on demand instead of buffering them, the streaming counterpart to <code class="inline">query</code>, for results too large to materialise at once (<code class="inline">mysql_use_result</code>. Bound to its <code class="inline">MysqlConn</code>, a single-command pipeline: the stream must be drained (<code class="inline">next</code> returns <code class="inline">None</code>) or [<code class="inline">close</code>d](MysqlRowStream::close) before another statement runs on that connection.</p></div></div>
-<h3>Functions &amp; methods <span class="count">11</span></h3>
+<div class="entry"><pre class="signature">pub struct MysqlStmt {
+  conn : MysqlConn
+  id : Int32
+  text : String
+  slots : Array[String]
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}</pre><div class="doc"><p>A statement MySQL prepares once and runs many times.</p><p><code class="inline">prepare</code> sends <code class="inline">COM_STMT_PREPARE</code> and keeps the server-side handle; every <code class="inline">execute</code>/<code class="inline">query</code> sends only the statement id and the values, which is both cheaper than re-parsing and the path that binds binary payloads without hex expansion. <code class="inline">close</code> sends <code class="inline">COM_STMT_CLOSE</code>, after which the handle raises <code class="inline">Closed</code>.</p><p>A <code class="inline">:name</code> statement is rewritten to MySQL's <code class="inline">?</code> spelling at prepare time and the slot names are kept, so <code class="inline">bind_named</code> works without the caller counting anything. A handle belongs to the connection that prepared it: one wire, one statement at a time.</p></div></div>
+<h3>Functions &amp; methods <span class="count">16</span></h3>
+<div class="entry"><pre class="signature">pub fn MysqlConn::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlConn::close(Self) -&gt; Unit</pre><div class="doc"><p>Close the socket (best-effort, idempotent).</p></div></div>
+<div class="entry"><pre class="signature">pub fn MysqlConn::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlConn::server_kind(Self) -&gt; @moonmysql.ServerKind</pre><div class="doc"><p>The dialect (MySQL or MariaDB) reported by the server's handshake.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::begin(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">begin</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn MysqlDriver::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::commit(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">commit</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn MysqlDriver::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::execute(Self, String, Array[@moondb.Value]) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::new(user~ : String, password? : String, database? : String, host? : String, port? : Int32, tls? : @tls.Client) -&gt; Self</pre><div class="doc"><p>Configure a driver. <code class="inline">host</code> defaults to loopback, <code class="inline">port</code> to 3306; <code class="inline">password</code> and <code class="inline">database</code> may be empty. <code class="inline">tls</code> turns on TLS for the connection.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::ping(Self) -&gt; Bool</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">ping</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn MysqlDriver::prepare(Self, String) -&gt; &amp;@moondb.Stmt raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">prepare</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::query(Self, String, Array[@moondb.Value]) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::query_stream(Self, String, Array[@moondb.Value]) -&gt; &amp;@moondb.Cursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn MysqlDriver::rollback(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">rollback</code>, callable on the value directly.</p></div></div>

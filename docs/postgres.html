@@ -37,7 +37,7 @@
       <div class="moon" data-moon="0.8,true" style="width:64px;height:64px;margin-bottom:var(--s3)"></div>
       <p class="folio">waxing gibbous · a statute of moondb</p>
       <h1>moonpostgres</h1>
-      <p class="lede">The PostgreSQL implementation of the <b>Driver</b> contract. Most of the surface is native, and its server-side cursor refines <code class="inline">query_stream</code> for bounded memory.</p>
+      <p class="lede">The PostgreSQL implementation of the <b>Driver</b> contract — extended query, a statement cache, server-side cursors, and <code class="inline">COPY</code> streamed in both directions.</p>
     </section>
 
     <section class="section">
@@ -45,8 +45,11 @@
       <h2>What it is</h2>
       <p class="muted">moonpostgres connects to a PostgreSQL server and implements <code class="inline">Driver</code> against it. It speaks the <code class="inline">$1, $2, …</code> placeholder token and binds parameters out-of-band.</p>
       <div class="article"><div class="num">i</div><div class="body"><h3>Install</h3><p class="muted"><code class="inline">moon add moonbitstack/moonpostgres</code></p></div></div>
-      <div class="article"><div class="num">ii</div><div class="body"><h3>Placeholder</h3><p class="muted"><code class="inline">$1, $2, …</code> positional — PostgreSQL's native numbered placeholders, bound server-side.</p></div></div>
-      <div class="article"><div class="num">iii</div><div class="body"><h3>Coverage</h3><p class="muted"><span class="dot green"></span>execute <span class="dot green"></span>query <span class="dot green"></span>transaction <span class="dot green"></span>close <span class="dot green"></span>query_stream (native cursor) <span class="dot gray"></span>ping (default).</p></div></div>
+      <div class="article"><div class="num">ii</div><div class="body"><h3>Placeholder</h3><p class="muted"><code class="inline">$1, $2, …</code> positional — PostgreSQL's native numbered placeholders, bound server-side. A <code class="inline">:name</code> statement is rewritten to them at prepare time and the slot names are kept, so <code class="inline">bind_named</code> takes a map.</p></div></div>
+      <div class="article"><div class="num">iii</div><div class="body"><h3>Prepared statements</h3><p class="muted"><code class="inline">prepare</code> sends <code class="inline">Parse</code> under a name cached by SQL text, so a repeated statement binds instead of re-parsing; <code class="inline">Close</code> reclaims it and drops the cache entry.</p></div></div>
+      <div class="article"><div class="num">iv</div><div class="body"><h3>Streaming</h3><p class="muted"><code class="inline">PgRowStream</code> reads one response off the wire; <code class="inline">PgCursor</code> is a <code class="inline">DECLARE</code>/<code class="inline">FETCH</code> cursor the server holds open, a batch per round trip; <code class="inline">copy_in_stream</code> and <code class="inline">copy_out_stream</code> move <code class="inline">COPY</code> data one chunk at a time, so a 100 MB load never sits in memory.</p></div></div>
+      <div class="article"><div class="num">v</div><div class="body"><h3>Auth</h3><p class="muted"><span class="dot green"></span>trust <span class="dot green"></span>cleartext <span class="dot green"></span>MD5 <span class="dot green"></span>SCRAM-SHA-256, with SASLprep, channel binding and server-signature verification <span class="dot green"></span>TLS.</p></div></div>
+      <div class="article"><div class="num">vi</div><div class="body"><h3>Coverage</h3><p class="muted"><span class="dot green"></span>execute <span class="dot green"></span>query <span class="dot green"></span>transaction <span class="dot green"></span>close <span class="dot green"></span>query_stream (live) <span class="dot green"></span>prepare <span class="dot green"></span>dialect <span class="dot green"></span>LISTEN/NOTIFY <span class="dot green"></span>CancelRequest <span class="dot gray"></span>ping (default).</p></div></div>
     </section>
 
     <div class="statusbar">

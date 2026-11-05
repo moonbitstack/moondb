@@ -7,7 +7,7 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-213%20passing-2ea44f)](#tests)
+[![tests](https://img.shields.io/badge/tests-278%20passing-2ea44f)](#tests)
 [![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -63,12 +63,17 @@ moon add moonbitstack/moondb
 | [`AsyncDriver`](#asyncdriver) | the same contract for a backend reached over a socket, every method awaited | asyncpg / `asyncio` DB-API |
 | [`AsyncCursor`](#asyncdriver) | forward-only cursor whose `next` is awaited, for a wire driver's live rows | — |
 | [`MockDriver`](#mockdriver) | dependency-free in-memory reference driver, for tests | — |
+| [`Dialect`](#dialects-and-capabilities) | `Sqlite` / `Postgres` / `Mysql`, and the placeholder each spells | — |
+| [`Capabilities`](#dialects-and-capabilities) | what a backend can do beyond the base contract | — |
+| [`QueryExecutor`](#the-narrow-view) | the part of a driver that runs SQL, without the part that owns the connection | Go `Queryer` context, SQLAlchemy `Connection.exec_driver_sql` |
+| [`Stmt`](#one-statement-many-runs) | a statement prepared once and run with new values, plus `bind_named` | Go `*sql.Stmt`, JDBC `PreparedStatement` |
+| [`Txn`](#nested-transactions) | a closure-scoped transaction that nests through savepoints | SQLAlchemy `Session.begin_nested` |
 
 ### The binding contract
 
-`execute` and `query` both take `(sql, params)`. The SQL string carries **positional placeholders** and `params` supplies one `Value` per placeholder, **in order**. Values are bound out-of-band by the driver and are **never** spliced into the SQL text — that is what makes a moondb-based stack injection-safe all the way to the wire.
+`execute` and `query` both take `(sql, params)`. The SQL string carries **positional placeholders** and `params` supplies one `Value` per placeholder, **in order**. Values are bound out-of-band by the driver and are **never** spliced into the SQL text — that is what makes a moondb-based stack injection-safe all the way to the wire. All three drivers bind out of band: SQLite through `sqlite3_bind_*`, PostgreSQL through the extended-query protocol, MySQL through `COM_STMT_EXECUTE`.
 
-The placeholder *token* is the driver's dialect (`?` for SQLite/MySQL, `$1`, `$2`, … for PostgreSQL); moondb fixes the *calling convention* — an ordered `Array[Value]` — not the spelling.
+The placeholder *token* is the driver's dialect (`?` for SQLite/MySQL, `$1`, `$2`, … for PostgreSQL); moondb fixes the *calling convention* — an ordered `Array[Value]` — not the spelling. [`Dialect::placeholder`](#dialects-and-capabilities) spells one, and [`rewrite_named`](#named-parameters) accepts `:name` and produces the right form for whichever backend is underneath.
 
 ### Value cases
 
@@ -130,12 +135,114 @@ impl @moondb.FromValue for Email with fn from_value(v) {
 }
 ```
 
-## Implementing a driver
+## One statement, many runs
 
-A backend implements the six-method `Driver` trait. `DbError` is `pub(all)`, so a driver in its own package can construct and raise every case:
+`Driver::execute` prepares, binds, runs and discards in one call. A `Stmt` is the handle that survives instead: the server parses and plans once, and each run sends only the values. `bind` replaces them, `execute` and `query` run the statement, `close` releases the server-side resources.
 
 ```moonbit
-pub impl @moondb.Driver for MyConn with execute(self, sql, params) {
+test "one statement, two bindings" {
+  let db = @moondb.MockDriver::new()
+  let stmt = db.prepare("INSERT INTO hero (id, name) VALUES (?, ?)")
+  stmt.bind([@moondb.Value::Int(1), @moondb.Value::Text("Nova")])
+  stmt.execute() |> ignore
+  stmt.bind([@moondb.Value::Int(2), @moondb.Value::Text("Iris")])
+  stmt.execute() |> ignore
+  stmt.close()
+  assert_eq(db.row_count(), 2)
+}
+```
+
+All three drivers prepare on the server: SQLite compiles a `sqlite3_stmt`, PostgreSQL sends `Parse` under a cached name, MySQL sends `COM_STMT_PREPARE`. A driver that has nothing server-side to offer still hands out a working handle — the default keeps the text and the values and re-runs the ordinary path.
+
+## Named parameters
+
+`:name` reads better than a column of `?`, and it survives a statement being reordered. `rewrite_named` turns one into the backend's own spelling and records which value each position takes:
+
+```moonbit
+test "the same named statement for every backend" {
+  let sql = "SELECT * FROM hero WHERE id = :id AND realm = :realm"
+  let pg = @moondb.rewrite_named(sql, @moondb.Dialect::Postgres)
+  assert_eq(pg.sql, "SELECT * FROM hero WHERE id = $1 AND realm = $2")
+
+  let lite = @moondb.rewrite_named(sql, @moondb.Dialect::Sqlite)
+  assert_eq(lite.sql, "SELECT * FROM hero WHERE id = ? AND realm = ?")
+
+  let args : Map[String, @moondb.Value] = Map([])
+  args.set("id", @moondb.Value::Int(7))
+  args.set("realm", @moondb.Value::Text("north"))
+  assert_eq(lite.bind(args).length(), 2)
+}
+```
+
+The rewrite is a lexer rather than a search-and-replace: a `:name` inside a string literal, a quoted identifier, a `--` / `#` / `/* */` comment or a PostgreSQL `$tag$ … $tag$` body is left alone, a `::` cast and a `:=` argument are not parameters, an array slice `arr[1:3]` is not one either, and mixing `?` with `:name` is refused with the offset that broke it. A repeated name reuses one `$n` on PostgreSQL and repeats its value on the positional dialects, which is what each wire actually allows.
+
+## Nested transactions
+
+`begin` / `commit` / `rollback` are flat, but application code nests: a service opens a transaction, calls a repository method that opens one too, and the inner failure must not discard the outer work. `Txn` brackets a body and derives the savepoint name from the nesting depth, so the pairing cannot be forgotten and two levels never collide:
+
+```moonbit
+test "a nested body that fails keeps the outer work" {
+  let db = @moondb.MockDriver::new()
+  let tx = @moondb.Txn::new(db)
+  tx.run(fn(tx) raise @moondb.DbError {
+    tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [
+      @moondb.Value::Int(1), @moondb.Value::Text("Nova"),
+    ])
+    |> ignore
+    (try {
+      tx.run(fn(_tx) raise @moondb.DbError {
+        raise @moondb.QueryError("inner failed")
+      })
+    } catch {
+      _ => ()
+    })
+    |> ignore
+  })
+  assert_eq(db.row_count(), 1)
+}
+```
+
+`AsyncTxn` is the same for an `AsyncDriver`, with every round trip awaited.
+
+## Dialects and capabilities
+
+A query layer that has to emit SQL needs two things from the backend: the placeholder spelling, and what the backend can do beyond the base contract. Both come from the driver, so the layer is written once and runs everywhere instead of the caller naming the backend a second time at every call site.
+
+```moonbit
+test "ask the driver, not the caller" {
+  let db = @moondb.MockDriver::new()
+  assert_eq(db.dialect(), @moondb.Dialect::Sqlite)
+  assert_eq(db.dialect().placeholder(1), "?")
+  let caps = db.capabilities()
+  assert_true(caps.savepoints)
+  assert_false(caps.streaming_copy)
+}
+```
+
+`Capabilities` reports prepared statements, named parameters, server-side cursors, streaming `COPY`, savepoints, multiple result sets, unsigned 64-bit integers and `RETURNING` — what the driver in this repository implements, not what the server software could do in principle.
+
+## The narrow view
+
+A repository method, a query builder, a migration step all want to run SQL; none of them should be able to `close` the connection out from under the caller that lent it to them. `Executor::new(db)` is that narrower handle, and a function that takes `&QueryExecutor` accepts it:
+
+```moonbit
+test "a repository only needs to run SQL" {
+  let db = @moondb.MockDriver::new()
+  fn count(db : &@moondb.QueryExecutor) -> Int raise @moondb.DbError {
+    db.query("SELECT 1", []).length()
+  }
+  assert_eq(count(@moondb.Executor::new(db)), 0)
+}
+```
+
+## Implementing a driver
+
+A backend implements the `Driver` trait: the four data operations, the three transaction brackets, `close`, and the two introspection methods `dialect` and `capabilities`. `query_stream`, `ping` and `prepare` have defaults, so a minimal driver is short. `DbError` is `pub(all)`, so a driver in its own package can construct and raise every case:
+
+```moonbit
+pub impl @moondb.Driver for MyConn with fn dialect(_self) { @moondb.Dialect::Sqlite }
+
+pub impl @moondb.Driver for MyConn with fn execute(self, sql, params) {
   // ... bind `params` positionally, run `sql`, then:
   { rows_affected: n, last_insert_id: id }
 }
@@ -158,18 +265,24 @@ pub impl @moondb.Driver for MyConn with execute(self, sql, params) {
 
 - **The PostgreSQL protocol state machine is testable without a machine.** `PgConn` speaks over a `PgWire`, which is either a socket (plain or TLS-wrapped) or one end of an in-memory pipe pair. That seam is what lets the parts that used to be unreachable — statement sequencing, the streaming guard that refuses a second statement while a `PgRowStream` is open, draining the rest of a result after an `ErrorResponse`, the COPY sub-protocol, notifications, the statement cache — run against a scripted peer in a unit test, byte for byte, with no server and no network. The live integration suites still exist and still run against real TLS-enabled servers; the offline tests are what catch a regression on a laptop with no database.
 
-## Roadmap
+## What each driver supports
 
-v0.1 fixes the smallest contract that a relational backend and a query layer both need, so it can stabilise. Planned, additive extensions (none of which change the v0.1 surface):
+| | SQLite | PostgreSQL | MySQL |
+|---|:--:|:--:|:--:|
+| Prepared `Stmt` | yes | yes, with a statement cache | yes |
+| Named parameters | yes | yes | yes |
+| Server-side cursor | no | yes, `DECLARE`/`FETCH` in batches | no |
+| Streaming `COPY` | no | yes, both directions | no |
+| Savepoints | yes | yes | yes |
+| Multiple result sets | no | yes | yes |
+| Unsigned 64-bit | no | no | yes |
+| `RETURNING` | yes | yes | no |
 
-- **Prepared statements** — both wire drivers bind out-of-band now (PostgreSQL runs the extended-query protocol, MySQL uses `COM_STMT_PREPARE` and the binary protocol); a public rebindable `Stmt` handle is still to come.
-- **Server-side cursors** — `Cursor` / `AsyncCursor` stream rows, and PostgreSQL `DECLARE` / `FETCH` cursors are available; a portal that fetches in batches is still to come.
-- **Streaming COPY** — the PostgreSQL driver runs `COPY … TO STDOUT` / `FROM STDIN` over the copy sub-protocol; a public streaming source/sink is still to come.
-- **Named parameters** and **nested transactions (savepoints)** as a layer over the flat `begin`/`commit`/`rollback`.
+A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement.
 
 ## Tests
 
-The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics — both connection pools, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; and dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red. They run on all four backends:
+The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics and savepoint scope — both connection pools, the `:name` lexer (literals, identifiers, comments, dollar quotes, casts, JSONB operators, mixed conventions), the statement handles, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire: statement sequencing, the streaming guard, the post-error drain, the prepared handle, the server-side cursor and the COPY sub-protocol. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; breaking the savepoint rollback scope turns the nested-transaction tests red; breaking the dollar-quote lexing turns the named-parameter tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; and dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red. They run on all four backends:
 
 ```bash
 moon test --target all
