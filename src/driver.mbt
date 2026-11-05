@@ -32,9 +32,7 @@
 ///   idempotent, matching Go's `io.Closer` discipline for connections.
 ///
 /// This trait is `pub(open)` so out-of-tree drivers (moonsqlite, moonpostgres,
-/// moonmysql, …) can implement it. A future prepared-`Stmt` handle and a streaming
-/// `Rows` cursor are noted in the README roadmap; v0.1 fixes exactly the operations
-/// below so the contract everything pins to stays small and stable.
+/// moonmysql, …) can implement it.
 pub(open) trait Driver {
   /// Run a non-row statement with bound `params`; report rows changed and last id.
   fn execute(Self, String, Array[Value]) -> ExecResult raise DbError
@@ -61,6 +59,42 @@ pub(open) trait Driver {
   /// issues the universally accepted `SELECT 1` and reports whether it round-trips;
   /// a driver whose backend has a cheaper heartbeat (or none) overrides it.
   fn ping(Self) -> Bool = _
+  /// Allocate a [`Stmt`] — a handle that runs one SQL text with new values on every
+  /// call. The default keeps the text and the last bound values on the calling
+  /// side and re-runs the ordinary `execute`/`query` path; a driver whose server
+  /// can prepare once (all three ratified ones can) overrides it with a real
+  /// server-side handle.
+  fn prepare(Self, String) -> &Stmt raise DbError = _
+  /// The SQL dialect this driver speaks. A query layer reads it once to choose the
+  /// placeholder spelling and the SQL it emits, instead of being told the backend
+  /// a second time. A driver that numbers its parameters (PostgreSQL) must
+  /// override the default; the default is the positional `?` spelling, so an
+  /// undeclared numbered backend fails loudly at the server rather than silently
+  /// binding the wrong value.
+  fn dialect(Self) -> Dialect = _
+  /// What this backend can do beyond the base contract, derived from its dialect.
+  fn capabilities(Self) -> Capabilities = _
+}
+
+///|
+/// The default `dialect`: the positional `?` spelling shared by SQLite and MySQL.
+impl Driver with fn dialect(_self : Self) -> Dialect {
+  Sqlite
+}
+
+///|
+/// The default `capabilities`: the preset for the reported dialect.
+impl Driver with fn capabilities(self : Self) -> Capabilities {
+  Capabilities::for_dialect(self.dialect())
+}
+
+///|
+/// The default `prepare`: keep the text and the bound values on the calling side
+/// and re-run `execute`/`query` for each `execute`/`query` on the handle. It
+/// honours the [`Stmt`] contract without server-side preparation, so a driver that
+/// has nothing better to offer still hands out a working handle.
+impl Driver with fn prepare(self : Self, sql : String) -> &Stmt raise DbError {
+  BufferedStmt::new(self, sql)
 }
 
 ///|

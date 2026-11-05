@@ -91,6 +91,9 @@ pub extend FakeConn with @moondb.AsyncDriver::{
   rollback,
   close,
   ping,
+  prepare,
+  dialect,
+  capabilities,
 }
 
 ///|

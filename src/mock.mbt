@@ -18,13 +18,59 @@ pub struct MockDriver {
   mut rows : Array[Row]
   mut next_id : Int64
   savepoints : Array[Int32]
+  // Named savepoints, each with the store length it must restore to. Kept apart from
+  // `savepoints` because `begin` nests anonymously while `Txn` names its levels.
+  named_savepoints : Array[(String, Int32)]
   mut closed : Bool
 }
 
 ///|
 /// A fresh, empty mock connection.
 pub fn MockDriver::new() -> MockDriver {
-  { rows: [], next_id: 0, savepoints: [], closed: false, }
+  { rows: [], next_id: 0, savepoints: [], named_savepoints: [], closed: false, }
+}
+
+///|
+/// Apply one of the three savepoint statements. `ROLLBACK TO` truncates the store to
+/// the length recorded when the savepoint was taken and keeps the savepoint alive;
+/// `RELEASE` drops it.
+fn MockDriver::run_savepoint(self : MockDriver, sql : String) -> Unit {
+  let head = sql.trim_start().to_upper()
+  if head.has_prefix("SAVEPOINT ") {
+    let name = sql.trim_start()[10:].to_owned().trim().to_owned()
+    self.named_savepoints.push((name, self.rows.length()))
+  } else if head.has_prefix("RELEASE SAVEPOINT ") {
+    let name = sql.trim_start()[18:].to_owned().trim().to_owned()
+    let mut i = self.named_savepoints.length() - 1
+    while i >= 0 {
+      if self.named_savepoints[i].0 == name {
+        self.named_savepoints.remove(i) |> ignore
+        return
+      }
+      i -= 1
+    }
+  } else if head.has_prefix("ROLLBACK TO SAVEPOINT ") {
+    let name = sql.trim_start()[22:].to_owned().trim().to_owned()
+    let mut i = self.named_savepoints.length() - 1
+    while i >= 0 {
+      if self.named_savepoints[i].0 == name {
+        self.rows = self.rows[:self.named_savepoints[i].1].to_owned()
+        return
+      }
+      i -= 1
+    }
+  }
+}
+
+///|
+/// Whether `sql` is one of the three savepoint statements `Txn` issues. The mock does
+/// not parse SQL; it recognises exactly the statements its own nesting helper sends
+/// so a nested transaction does not turn into stored rows.
+fn is_savepoint_statement(sql : String) -> Bool {
+  let head = sql.trim_start().to_upper()
+  head.has_prefix("SAVEPOINT ") ||
+  head.has_prefix("RELEASE SAVEPOINT ") ||
+  head.has_prefix("ROLLBACK TO SAVEPOINT ")
 }
 
 ///|
@@ -52,11 +98,18 @@ pub fn MockDriver::in_transaction(self : MockDriver) -> Bool {
 /// exists to prove the ORM issued a statement, not to interpret it.
 pub impl Driver for MockDriver with fn execute(
   self : MockDriver,
-  _sql : String,
+  sql : String,
   params : Array[Value],
 ) -> ExecResult raise DbError {
   if self.closed {
     raise Closed
+  }
+  if is_savepoint_statement(sql) {
+    // Transaction control is modeled here, not stored as a row: `Txn` drives its
+    // nesting through `execute`, and the savepoint must undo exactly the rows written
+    // after it — that scope is the thing a test asserts on.
+    self.run_savepoint(sql)
+    return { rows_affected: 0, last_insert_id: 0, }
   }
   let columns = []
   for i in 0..<params.length() {
@@ -129,4 +182,7 @@ pub extend MockDriver with Driver::{
   commit,
   query,
   rollback,
+  prepare,
+  dialect,
+  capabilities,
 }

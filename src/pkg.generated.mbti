@@ -12,6 +12,8 @@ pub fn drain(&Cursor) -> Array[Row] raise DbError
 
 pub async fn drain_async(&AsyncCursor) -> Array[Row] raise DbError
 
+pub fn rewrite_named(String, Dialect) -> Named raise DbError
+
 // Errors
 pub(all) suberror DbError {
   ConnectError(String)
@@ -46,6 +48,74 @@ pub fn AsyncArrayCursor::new(Array[Row]) -> Self
 pub async fn AsyncArrayCursor::next(Self) -> Row? raise DbError
 pub impl AsyncCursor for AsyncArrayCursor
 
+pub struct AsyncExecutor[T] {
+  inner : T
+}
+pub fn[T : AsyncDriver] AsyncExecutor::capabilities(Self[T]) -> Capabilities
+pub fn[T : AsyncDriver] AsyncExecutor::dialect(Self[T]) -> Dialect
+pub fn[T] AsyncExecutor::driver(Self[T]) -> T
+pub async fn[T : AsyncDriver] AsyncExecutor::execute(Self[T], String, Array[Value]) -> ExecResult raise DbError
+pub fn[T] AsyncExecutor::new(T) -> Self[T]
+pub async fn[T : AsyncDriver] AsyncExecutor::query(Self[T], String, Array[Value]) -> Array[Row] raise DbError
+pub async fn[T : AsyncDriver] AsyncExecutor::query_stream(Self[T], String, Array[Value]) -> &AsyncCursor raise DbError
+pub impl[T : AsyncDriver] AsyncQueryExecutor for AsyncExecutor[T]
+
+pub struct AsyncTxn[T] {
+  driver : T
+  mut depth : Int32
+}
+pub fn[T] AsyncTxn::depth(Self[T]) -> Int32
+pub fn[T] AsyncTxn::driver(Self[T]) -> T
+pub fn[T] AsyncTxn::new(T) -> Self[T]
+pub async fn[T : AsyncDriver] AsyncTxn::run(Self[T], async (Self[T]) -> Unit raise DbError) -> Unit raise DbError
+
+pub struct BufferedAsyncStmt[T] {
+  driver : T
+  text : String
+  mut params : Array[Value]
+  mut closed : Bool
+}
+pub fn[T] BufferedAsyncStmt::new(T, String) -> Self[T]
+
+pub struct BufferedStmt[T] {
+  driver : T
+  text : String
+  mut params : Array[Value]
+  mut closed : Bool
+}
+pub fn[T] BufferedStmt::new(T, String) -> Self[T]
+
+#derive(Eq)
+pub(all) struct Capabilities {
+  dialect : Dialect
+  prepared_statements : Bool
+  named_parameters : Bool
+  server_cursors : Bool
+  streaming_copy : Bool
+  savepoints : Bool
+  multiple_result_sets : Bool
+  unsigned_integers : Bool
+  returning : Bool
+}
+pub fn Capabilities::count(Self) -> Int32
+pub fn Capabilities::equal(Self, Self) -> Bool
+pub fn Capabilities::for_dialect(Dialect) -> Self
+pub fn Capabilities::is_for(Self, Dialect) -> Bool
+pub fn Capabilities::not_equal(Self, Self) -> Bool
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Dialect {
+  Sqlite
+  Postgres
+  Mysql
+}
+pub fn Dialect::equal(Self, Self) -> Bool
+pub fn Dialect::name(Self) -> String
+pub fn Dialect::not_equal(Self, Self) -> Bool
+pub fn Dialect::parse(String) -> Self?
+pub fn Dialect::placeholder(Self, Int32) -> String
+pub fn Dialect::to_repr(Self) -> @debug.Repr
+
 #derive(Eq, @debug.Debug)
 pub(all) enum ErrorKind {
   Interface
@@ -70,25 +140,50 @@ pub(all) struct ExecResult {
 pub fn ExecResult::equal(Self, Self) -> Bool
 pub fn ExecResult::not_equal(Self, Self) -> Bool
 
+pub struct Executor[T] {
+  inner : T
+}
+pub fn[T : Driver] Executor::capabilities(Self[T]) -> Capabilities
+pub fn[T : Driver] Executor::dialect(Self[T]) -> Dialect
+pub fn[T] Executor::driver(Self[T]) -> T
+pub fn[T : Driver] Executor::execute(Self[T], String, Array[Value]) -> ExecResult raise DbError
+pub fn[T] Executor::new(T) -> Self[T]
+pub fn[T : Driver] Executor::query(Self[T], String, Array[Value]) -> Array[Row] raise DbError
+pub fn[T : Driver] Executor::query_stream(Self[T], String, Array[Value]) -> &Cursor raise DbError
+pub impl[T : Driver] QueryExecutor for Executor[T]
+
 pub struct MockDriver {
   mut rows : Array[Row]
   mut next_id : Int64
   savepoints : Array[Int32]
+  named_savepoints : Array[(String, Int32)]
   mut closed : Bool
 }
 pub fn MockDriver::begin(Self) -> Unit raise DbError
+pub fn MockDriver::capabilities(Self) -> Capabilities
 pub fn MockDriver::close(Self) -> Unit
 pub fn MockDriver::commit(Self) -> Unit raise DbError
+pub fn MockDriver::dialect(Self) -> Dialect
 pub fn MockDriver::execute(Self, String, Array[Value]) -> ExecResult raise DbError
 pub fn MockDriver::in_transaction(Self) -> Bool
 pub fn MockDriver::is_closed(Self) -> Bool
 pub fn MockDriver::new() -> Self
 pub fn MockDriver::ping(Self) -> Bool
+pub fn MockDriver::prepare(Self, String) -> &Stmt raise DbError
 pub fn MockDriver::query(Self, String, Array[Value]) -> Array[Row] raise DbError
 pub fn MockDriver::query_stream(Self, String, Array[Value]) -> &Cursor raise DbError
 pub fn MockDriver::rollback(Self) -> Unit raise DbError
 pub fn MockDriver::row_count(Self) -> Int32
 pub impl Driver for MockDriver
+
+pub(all) struct Named {
+  sql : String
+  slots : Array[String]
+}
+pub fn Named::arity(Self) -> Int32
+pub fn Named::bind(Self, Map[String, Value]) -> Array[Value] raise DbError
+pub fn Named::is_named(Self) -> Bool
+pub fn Named::names(Self) -> Array[String]
 
 #derive(Eq, @debug.Debug)
 pub(all) struct Row {
@@ -139,6 +234,16 @@ pub(all) struct ServerDetail {
   severity : String?
 }
 
+pub struct Txn[T] {
+  driver : T
+  mut depth : Int32
+}
+pub fn[T] Txn::depth(Self[T]) -> Int32
+pub fn[T] Txn::driver(Self[T]) -> T
+pub fn[T] Txn::is_open(Self[T]) -> Bool
+pub fn[T] Txn::new(T) -> Self[T]
+pub fn[T : Driver] Txn::run(Self[T], (Self[T]) -> Unit raise DbError) -> Unit raise DbError
+
 #derive(Eq, @debug.Debug)
 pub(all) enum Value {
   Null
@@ -185,6 +290,28 @@ pub(open) trait AsyncDriver {
   async fn rollback(Self) -> Unit raise DbError
   async fn close(Self) -> Unit
   async fn ping(Self) -> Bool = _
+  async fn prepare(Self, String) -> &AsyncStmt raise DbError = _
+  fn dialect(Self) -> Dialect = _
+  fn capabilities(Self) -> Capabilities = _
+}
+
+pub(open) trait AsyncQueryExecutor {
+  async fn execute(Self, String, Array[Value]) -> ExecResult raise DbError
+  async fn query(Self, String, Array[Value]) -> Array[Row] raise DbError
+  async fn query_stream(Self, String, Array[Value]) -> &AsyncCursor raise DbError
+  fn dialect(Self) -> Dialect
+  fn capabilities(Self) -> Capabilities
+}
+
+pub(open) trait AsyncStmt {
+  async fn bind(Self, Array[Value]) -> Unit raise DbError
+  async fn execute(Self) -> ExecResult raise DbError
+  async fn query(Self) -> Array[Row] raise DbError
+  async fn query_stream(Self) -> &AsyncCursor raise DbError = _
+  async fn close(Self) -> Unit
+  fn sql(Self) -> String
+  fn params(Self) -> Array[String]
+  async fn bind_named(Self, Map[String, Value]) -> Unit raise DbError = _
 }
 
 pub(open) trait Cursor {
@@ -201,6 +328,9 @@ pub(open) trait Driver {
   fn rollback(Self) -> Unit raise DbError
   fn close(Self) -> Unit
   fn ping(Self) -> Bool = _
+  fn prepare(Self, String) -> &Stmt raise DbError = _
+  fn dialect(Self) -> Dialect = _
+  fn capabilities(Self) -> Capabilities = _
 }
 
 pub(open) trait FromValue {
@@ -214,6 +344,25 @@ pub impl FromValue for String
 pub impl[T : FromValue] FromValue for T?
 pub impl FromValue for Bytes
 pub impl FromValue for Array[Value]
+
+pub(open) trait QueryExecutor {
+  fn execute(Self, String, Array[Value]) -> ExecResult raise DbError
+  fn query(Self, String, Array[Value]) -> Array[Row] raise DbError
+  fn query_stream(Self, String, Array[Value]) -> &Cursor raise DbError
+  fn dialect(Self) -> Dialect
+  fn capabilities(Self) -> Capabilities
+}
+
+pub(open) trait Stmt {
+  fn bind(Self, Array[Value]) -> Unit raise DbError
+  fn execute(Self) -> ExecResult raise DbError
+  fn query(Self) -> Array[Row] raise DbError
+  fn query_stream(Self) -> &Cursor raise DbError = _
+  fn close(Self) -> Unit
+  fn sql(Self) -> String
+  fn params(Self) -> Array[String]
+  fn bind_named(Self, Map[String, Value]) -> Unit raise DbError = _
+}
 
 pub(open) trait ToValue {
   fn to_value(Self) -> Value

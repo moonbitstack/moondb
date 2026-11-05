@@ -54,6 +54,35 @@ pub(open) trait AsyncDriver {
   /// broken connection is a plain "unhealthy" verdict. The default issues
   /// `SELECT 1`; a driver with a cheaper heartbeat overrides it.
   async fn ping(Self) -> Bool = _
+  /// Allocate an [`AsyncStmt`] — a handle that runs one SQL text with new values on
+  /// every call. The default re-runs `execute`/`query` from the calling side; a
+  /// driver whose server can prepare once overrides it with a real server-side
+  /// handle.
+  async fn prepare(Self, String) -> &AsyncStmt raise DbError = _
+  /// The SQL dialect this driver speaks. See [`Driver::dialect`]; the same default
+  /// and the same obligation to override for a numbered backend apply.
+  fn dialect(Self) -> Dialect = _
+  /// What this backend can do beyond the base contract.
+  fn capabilities(Self) -> Capabilities = _
+}
+
+///|
+/// The default async `dialect`: the positional `?` spelling.
+impl AsyncDriver with fn dialect(_self : Self) -> Dialect {
+  Sqlite
+}
+
+///|
+/// The default async `capabilities`: the preset for the reported dialect.
+impl AsyncDriver with fn capabilities(self : Self) -> Capabilities {
+  Capabilities::for_dialect(self.dialect())
+}
+
+///|
+/// The default async `prepare`: keep the text and the values on the calling side and
+/// re-run the driver's ordinary methods on every call.
+impl AsyncDriver with fn prepare(self : Self, sql : String) -> &AsyncStmt raise DbError {
+  BufferedAsyncStmt::new(self, sql)
 }
 
 ///|

@@ -3,3 +3,9 @@
 // DB-API 2.0). Zero dependencies by design: this package is pure and compiles on
 // every backend, so the interface everything else pins to never drags a backend
 // or an async runtime behind it.
+
+// The doc comments reference `@debug.Repr` through the derived Debug impls; core's
+// debug package is a compile-time dependency of the interface, not a runtime one.
+import {
+  "moonbitlang/core/debug",
+}
