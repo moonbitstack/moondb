@@ -115,8 +115,11 @@ jobs:
             -d '{"event_type":"released"}'
 
   # Its own job: the module is already out by now, so rerunning a failure here must not publish it again.
+  # One skill describes the whole repository and takes the root module's version, so only that
+  # module's tag publishes it; a driver's tag would publish the same version a second time.
   skills:
     needs: publish
+    if: startsWith(github.ref_name, 'moondb-v')
     runs-on: ubuntu-26.04
     environment: mooncakes
     steps:
