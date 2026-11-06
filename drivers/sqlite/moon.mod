@@ -1,6 +1,6 @@
 name = "moonbitstack/moonsqlite"
 
-version = "0.3.5"
+version = "0.3.6"
 
 readme = "README.md"
 
@@ -27,7 +27,7 @@ description = "SQLite driver for moondb/moonorm — native FFI, amalgamation ven
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.2.6",
+  "moonbitstack/moondb@0.2.7",
 }
 
 source = "src"

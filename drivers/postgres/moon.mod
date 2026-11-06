@@ -1,6 +1,6 @@
 name = "moonbitstack/moonpostgres"
 
-version = "0.6.9"
+version = "0.6.10"
 
 readme = "README.md"
 
@@ -35,12 +35,12 @@ description = "Pure-MoonBit PostgreSQL wire-protocol driver implementing @moondb
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.2.6",
+  "moonbitstack/moondb@0.2.7",
   "moonbitstack/moonvar@0.2.1",
   "moonbitstack/moonbase@0.4.3",
   "moonbitstack/mooncrypt@0.4.11",
   "moonbitstack/mooncred@0.6.9",
-  "moonbitstack/moonnet@0.1.9",
+  "moonbitstack/moonnet@0.1.10",
   "moonbitstack/moontls@0.9.14",
   "moonbitstack/moonucd@0.1.3",
   "moonbitlang/async@0.22.5",
