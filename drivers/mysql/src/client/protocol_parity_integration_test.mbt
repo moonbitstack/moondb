@@ -78,8 +78,14 @@ async test "integration: the text and binary protocols agree column by column" {
   assert_eq(binary_rows[0].time(10), "2024-01-02")
   assert_eq(binary_rows[0].text(14), "héllo 'quoted'")
   assert_eq(binary_rows[0].blob(16), b"\x00\xff\x10")
-  // MySQL stores JSON in its own binary form and serialises it back key by key.
-  assert_eq(binary_rows[0].json(18), "{\"a\": 1, \"b\": 2}")
+  // MySQL has a JSON type of its own and serialises it back key by key; MariaDB's
+  // `JSON` is `LONGTEXT` with a validity check, so it hands back the text as written
+  // and reads as `Text`. Both protocols agree on whichever the server does.
+  match binary_rows[0].values[18] {
+    @moondb.Json(body) => assert_eq(body, "{\"a\": 1, \"b\": 2}")
+    @moondb.Text(body) => assert_eq(body, "{\"b\": 2, \"a\": 1}")
+    other => fail("a JSON column read back as " + other.kind())
+  }
   assert_eq(binary_rows[1].is_null(4), true)
 
   // A `FLOAT` column is the one type the two protocols disagree about, and the server

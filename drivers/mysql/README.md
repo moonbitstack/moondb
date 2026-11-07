@@ -206,6 +206,11 @@ all four bytes in the binary one, so the two paths carry different doubles for t
 stored 32-bit value. It is pinned by a test rather than smoothed over: read `FLOAT`
 through a prepared statement, or use `DOUBLE`, when the exact 32-bit value matters.
 
+A **`JSON`** column is a dialect difference rather than a divergence: MySQL parses it
+into a JSON type of its own and reads back as `Json` with its keys reordered, while
+MariaDB's `JSON` is `LONGTEXT` with a validity check and reads back as `Text`, word for
+word as written. Both protocols report whichever the server does.
+
 ### Authentication
 
 - **`mysql_native_password`** — SHA1 scramble, and the down-negotiation a MariaDB
