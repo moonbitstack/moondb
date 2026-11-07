@@ -569,13 +569,37 @@ async fn MysqlConn::stmt_close(self : MysqlConn, id : Int32) -> Unit {
 }
 
 ///|
+/// Bind `params` to the prepared statement `id` and execute it.
+///
+/// Parameters too large to inline go first, streamed with
+/// `COM_STMT_SEND_LONG_DATA` one chunk at a time; the execute packet that follows
+/// binds them without repeating their bytes. The server sends no answer to the long
+/// data, so a streamed statement costs the same one round trip as an inline one.
+async fn MysqlConn::send_execute(
+  self : MysqlConn,
+  id : Int32,
+  params : Array[@moondb.Value],
+) -> Unit {
+  let streamed = @moonmysql.long_data_params(params)
+  for index in streamed {
+    for slice in @moonmysql.long_data_slices(params, index) {
+      self.write_packet(
+        0,
+        @moonmysql.build_stmt_send_long_data(id, index, slice),
+      )
+    }
+  }
+  self.write_packet(0, @moonmysql.build_stmt_execute(id, params, streamed~))
+}
+
+///|
 /// Run a prepared statement and materialise its rows from the binary protocol.
 async fn MysqlConn::read_prepared_rows(
   self : MysqlConn,
   id : Int32,
   params : Array[@moondb.Value],
 ) -> Array[@moondb.Row] {
-  self.write_packet(0, @moonmysql.build_stmt_execute(id, params))
+  self.send_execute(id, params)
   let first = self.read_packet()
   if @moonmysql.is_err_packet(first) {
     raise @moonmysql.parse_err(first)
@@ -633,7 +657,7 @@ async fn MysqlConn::prepared_execute(
 ) -> @moondb.ExecResult {
   let stmt = self.compile(sql)
   errdefer @async.protect_from_cancel(() => self.stmt_close(stmt.id))
-  self.write_packet(0, @moonmysql.build_stmt_execute(stmt.id, params))
+  self.send_execute(stmt.id, params)
   let first = self.read_packet()
   if @moonmysql.is_err_packet(first) {
     raise @moonmysql.parse_err(first)

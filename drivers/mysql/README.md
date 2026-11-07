@@ -137,6 +137,34 @@ The binary protocol's row decoder reads the column flags word: an `INT UNSIGNED`
 above 2^31-1 comes back as `Int64` rather than a negative `Int`, and a
 `BIGINT UNSIGNED` above 2^63-1 keeps its exact digits as `Text`.
 
+## Long parameters
+
+A parameter of one mebibyte or more is not carried inside `COM_STMT_EXECUTE`. It is
+streamed first, in `COM_STMT_SEND_LONG_DATA` packets of one mebibyte each; the execute
+packet that follows still declares its type — the server needs to know how to read the
+buffered bytes — but does not repeat the value. The server appends the pieces in order
+and answers none of them, so a streamed statement still costs one round trip.
+
+```moonbit
+async fn store(conn : @client.MysqlConn, id : Int, raw : Bytes) -> Unit raise {
+  // A 40 MB blob: four long-data packets, then a one-packet execute.
+  conn.execute("INSERT INTO asset VALUES (?, ?)", [
+    @moondb.Int(id), @moondb.Blob(raw),
+  ])
+  |> ignore
+}
+```
+
+No call site decides this: the driver does, by size, for every parameter of every
+prepared statement — so `execute`, `query`, a prepared handle and the internal paths all
+behave the same way. `@moonmysql.long_data_chunk` is the number, one mebibyte, and it is
+both the threshold and the packet size.
+
+Why it exists: `max_allowed_packet` caps a single packet — 64 MiB on MySQL 8 and 16 MiB
+on MariaDB by default — and an execute packet holds every parameter at once. A value near
+that cap is un-sendable inline, however it is encoded; chunked, each packet is one
+mebibyte and the limit stops applying to the value itself.
+
 ## Type mapping (text protocol)
 
 | MySQL column type | `@moondb.Value` |
@@ -152,14 +180,31 @@ above 2^31-1 comes back as `Int64` rather than a negative `Int`, and a
 
 CI (`.github/workflows/ci.yml`) starts a real **MySQL 8** (pinned to
 `mysql_native_password`) and, in separate jobs, **MariaDB 11** and **MariaDB
-10.11**, then runs `moon check`/`build`/`test` on native against each. The one
-integration test — gated by `MYSQL_TEST` so a local `moon test` without a
-database skips it — connects, authenticates, creates a table, inserts
-parameter-bound rows (integers, UTF-8 text, an embedded quote), and asserts the
-decoded result set cell by cell; the same suite is green on all three servers.
+10.11**, then runs `moon check`/`build`/`test` on native against each. The
+integration tests — gated by `MYSQL_TEST` so a local `moon test` without a database
+skips them — connect, authenticate, create tables, insert parameter-bound rows
+(integers, UTF-8 text, an embedded quote), and assert the decoded result sets cell by
+cell; the same suite is green on all three servers. Among them:
+
+- **Protocol parity** — one table of twenty column types, read once with `COM_QUERY`
+  and once through a prepared statement, compared value by value, so the protocol a
+  caller happens to take cannot change what it reads.
+- **Long parameters** — a blob and a text value above one mebibyte inserted through a
+  prepared statement, then read back over both protocols and compared byte for byte,
+  next to a parameter just under the threshold that stayed inline.
+
 The pure codec additionally runs on every backend, and `parse_server_version`
 has a unit test covering both MariaDB's `5.5.5-` sentinel and a plain MySQL
 version string.
+
+## Consistency
+
+Every column type reads the same through the text and the binary protocol, with one
+exception the server causes and no client can paper over: a **`FLOAT`** column. MySQL
+renders `float` with six significant digits in the text protocol (`1.23457`) and sends
+all four bytes in the binary one, so the two paths carry different doubles for the same
+stored 32-bit value. It is pinned by a test rather than smoothed over: read `FLOAT`
+through a prepared statement, or use `DOUBLE`, when the exact 32-bit value matters.
 
 ### Authentication
 
@@ -197,8 +242,6 @@ be load-bearing, because a backslash there can continue a multibyte character.
   `caching_sha2_password` and not a default anywhere current.
 - **Compressed protocol** and the **X protocol**. Neither changes what a query
   layer can ask for.
-- **`COM_STMT_SEND_LONG_DATA`** — a value larger than `max_allowed_packet` has to
-  be chunked by the caller today.
 - **`LOAD DATA LOCAL INFILE`**. It is disabled on most servers; `COPY`-style bulk
   loading goes through prepared statements here.
 
@@ -212,5 +255,6 @@ connect time and escapes for what it finds — a doubled quote under
 `0x5C` (gbk, big5, sjis, cp932, gb18030) cannot be escaped safely with backslashes at
 all, so such a connection is refused rather than served.
 
-Prepared statements (`COM_STMT_PREPARE` + the binary protocol) are what remove the
-question entirely, and are the next thing this driver needs.
+A statement with parameters never takes that path: it goes over
+`COM_STMT_PREPARE`/`COM_STMT_EXECUTE`, where the values travel in the binary protocol
+and the SQL text is never built.

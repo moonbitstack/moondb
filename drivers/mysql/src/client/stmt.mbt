@@ -79,7 +79,7 @@ impl @moondb.AsyncStmt for MysqlStmt with fn execute(self) {
 /// The wire half of `execute`, raising the driver's own error type.
 async fn MysqlStmt::run_execute(self : MysqlStmt) -> @moondb.ExecResult {
   self.ensure_open()
-  self.conn.write_packet(0, @moonmysql.build_stmt_execute(self.id, self.params))
+  self.conn.send_execute(self.id, self.params)
   let first = self.conn.read_packet()
   if @moonmysql.is_err_packet(first) {
     raise @moonmysql.parse_err(first)

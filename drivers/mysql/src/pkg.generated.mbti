@@ -17,9 +17,11 @@ pub fn build_ssl_request(String, charset? : Int32) -> Bytes
 
 pub fn build_stmt_close(Int32) -> Bytes
 
-pub fn build_stmt_execute(Int32, Array[@moondb.Value]) -> Bytes
+pub fn build_stmt_execute(Int32, Array[@moondb.Value], streamed? : Array[Int32]) -> Bytes
 
 pub fn build_stmt_prepare(String) -> Bytes
+
+pub fn build_stmt_send_long_data(Int32, Int32, Bytes) -> Bytes
 
 pub fn build_text_rows(Array[ColumnDef], Array[Bytes]) -> Array[@moondb.Row] raise MysqlError
 
@@ -66,6 +68,12 @@ pub fn is_eof_packet(Bytes) -> Bool
 pub fn is_err_packet(Bytes) -> Bool
 
 pub fn is_ok_packet(Bytes) -> Bool
+
+pub let long_data_chunk : Int32
+
+pub fn long_data_params(Array[@moondb.Value]) -> Array[Int32]
+
+pub fn long_data_slices(Array[@moondb.Value], Int32) -> Array[Bytes]
 
 pub let mariadb_client_cache_metadata : Int32
 

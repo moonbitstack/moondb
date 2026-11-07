@@ -63,11 +63,101 @@ pub fn build_stmt_close(id : Int32) -> Bytes {
 }
 
 ///|
+/// How much of one parameter a `COM_STMT_SEND_LONG_DATA` packet carries, and the
+/// length at which a parameter stops travelling inside the execute packet and is
+/// streamed this way instead.
+///
+/// A packet is capped by the server's `max_allowed_packet` (64 MiB on MySQL 8 by
+/// default, 16 MiB on MariaDB), and the execute packet has to hold every parameter at
+/// once, so a value near that cap used to be un-sendable however it was encoded. One
+/// mebibyte is a sixteenth of the smaller default, which leaves room for the rest of
+/// the packet whatever the server is set to.
+pub let long_data_chunk : Int32 = 1048576
+
+///|
+/// COM_STMT_SEND_LONG_DATA (`0x18`): statement id, parameter index, then one slice of
+/// that parameter's value. The server appends slices in the order they arrive, answers
+/// nothing at all, and forgets the accumulated value once the statement is executed or
+/// reset — so the pieces must be sent immediately before the execute that binds them.
+pub fn build_stmt_send_long_data(
+  id : Int32,
+  param : Int32,
+  chunk : Bytes,
+) -> Bytes {
+  let buf = Buffer()
+  buf.write_byte(b'\x18')
+  put_uint_le(buf, id.to_int64(), 4)
+  put_uint_le(buf, param.to_int64(), 2)
+  buf.write_bytes(chunk[:])
+  buf.to_bytes()
+}
+
+///|
+/// The slices of parameter `index` to send with `COM_STMT_SEND_LONG_DATA`, in order.
+/// Empty when the value fits in the execute packet, which is the case for everything
+/// shorter than [`long_data_chunk`] and for `NULL`.
+pub fn long_data_slices(
+  params : Array[@moondb.Value],
+  index : Int32,
+) -> Array[Bytes] {
+  let slices : Array[Bytes] = []
+  if index < 0 || index >= params.length() || params[index] is @moondb.Null {
+    return slices
+  }
+  let value = param_bytes(params[index])
+  if value.length() < long_data_chunk {
+    return slices
+  }
+  let mut offset = 0
+  while offset < value.length() {
+    let end = if offset + long_data_chunk < value.length() {
+      offset + long_data_chunk
+    } else {
+      value.length()
+    }
+    slices.push(value[offset:end].to_owned())
+    offset = end
+  }
+  slices
+}
+
+///|
+/// The parameter indexes, ascending, whose value is streamed rather than inlined.
+/// `build_stmt_execute` takes this list so it can leave their value bytes out.
+pub fn long_data_params(params : Array[@moondb.Value]) -> Array[Int32] {
+  let indexes : Array[Int32] = []
+  for i in 0..<params.length() {
+    if long_data_slices(params, i).length() > 0 {
+      indexes.push(i)
+    }
+  }
+  indexes
+}
+
+///|
+fn is_streamed(streamed : Array[Int32], index : Int32) -> Bool {
+  for s in streamed {
+    if s == index {
+      return true
+    }
+  }
+  false
+}
+
+///|
 /// COM_STMT_EXECUTE (`0x17`) for statement `id`, binding `params` out-of-band.
 /// Every non-NULL parameter is declared as `VAR_STRING` (or `BLOB` for bytes) and
 /// sent length-encoded; the server coerces it to the column type. The NULL bitmap
 /// uses bit `i` for parameter `i`, LSB first.
-pub fn build_stmt_execute(id : Int32, params : Array[@moondb.Value]) -> Bytes {
+///
+/// `streamed` names the parameters whose value was already sent with
+/// `COM_STMT_SEND_LONG_DATA`: their type is still declared here — the server needs to
+/// know how to read the buffered bytes — but their value is not repeated.
+pub fn build_stmt_execute(
+  id : Int32,
+  params : Array[@moondb.Value],
+  streamed~ : Array[Int32] = [],
+) -> Bytes {
   let buf = Buffer()
   buf.write_byte(b'\x17')
   put_uint_le(buf, id.to_int64(), 4)
@@ -90,11 +180,11 @@ pub fn build_stmt_execute(id : Int32, params : Array[@moondb.Value]) -> Bytes {
     for p in params {
       put_uint_le(buf, param_type(p).to_int64(), 2)
     }
-    for p in params {
-      if p is @moondb.Null {
+    for i in 0..<n {
+      if params[i] is @moondb.Null || is_streamed(streamed, i) {
         continue
       }
-      put_lenenc_bytes(buf, param_bytes(p))
+      put_lenenc_bytes(buf, param_bytes(params[i]))
     }
   }
   buf.to_bytes()
