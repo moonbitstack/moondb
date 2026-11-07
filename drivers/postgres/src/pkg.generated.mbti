@@ -11,6 +11,8 @@ import {
 // Values
 pub const OID_BOOL : Int32 = 16
 
+pub const OID_BPCHAR : Int32 = 1042
+
 pub const OID_BYTEA : Int32 = 17
 
 pub const OID_DATE : Int32 = 1082
@@ -29,6 +31,8 @@ pub const OID_JSON : Int32 = 114
 
 pub const OID_JSONB : Int32 = 3802
 
+pub const OID_NAME : Int32 = 19
+
 pub const OID_NUMERIC : Int32 = 1700
 
 pub const OID_TIME : Int32 = 1083
@@ -41,9 +45,11 @@ pub const OID_TIMETZ : Int32 = 1266
 
 pub const OID_UUID : Int32 = 2950
 
+pub const OID_VARCHAR : Int32 = 1043
+
 pub fn build_bind(Array[@moondb.Value]) -> Bytes
 
-pub fn build_bind_named(String, String, Array[@moondb.Value]) -> Bytes
+pub fn build_bind_named(String, String, Array[@moondb.Value], formats? : Array[Int32]) -> Bytes
 
 pub fn build_cancel_request(Int32, Int32) -> Bytes
 
@@ -56,6 +62,8 @@ pub fn build_copy_done() -> Bytes
 pub fn build_copy_fail(String) -> Bytes
 
 pub fn build_describe_portal() -> Bytes
+
+pub fn build_describe_statement(String) -> Bytes
 
 pub fn build_execute() -> Bytes
 
@@ -149,9 +157,9 @@ pub async fn PgConn::notify(Self, String, payload? : String) -> Unit raise @moon
 pub fn PgConn::parameter(Self, String) -> String?
 pub async fn PgConn::ping(Self) -> Bool
 pub async fn PgConn::prepare(Self, String) -> &@moondb.AsyncStmt raise @moondb.DbError
-pub async fn PgConn::prepare_stmt(Self, String) -> PgStmt raise @moondb.DbError
-pub async fn PgConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
-pub async fn PgConn::query_stream(Self, String, Array[@moondb.Value]) -> PgRowStream raise @moondb.DbError
+pub async fn PgConn::prepare_stmt(Self, String, binary? : Bool) -> PgStmt raise @moondb.DbError
+pub async fn PgConn::query(Self, String, Array[@moondb.Value], binary? : Bool) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn PgConn::query_stream(Self, String, Array[@moondb.Value], binary? : Bool) -> PgRowStream raise @moondb.DbError
 pub async fn PgConn::rollback(Self) -> Unit raise @moondb.DbError
 pub async fn PgConn::unlisten(Self, String) -> Unit raise @moondb.DbError
 pub impl @moondb.AsyncDriver for PgConn
@@ -198,6 +206,7 @@ pub struct PgRowStream {
   conn : PgConn
   mut col_names : Array[String]
   mut col_oids : Array[Int32]
+  formats : Array[Int32]
   mut done : Bool
 }
 pub async fn PgRowStream::close(Self) -> Unit raise @moondb.DbError
@@ -213,6 +222,10 @@ pub struct PgStmt {
   slots : Array[String]
   mut params : Array[@moondb.Value]
   mut closed : Bool
+  col_names : Array[String]
+  col_oids : Array[Int32]
+  formats : Array[Int32]
+  binary : Bool
 }
 
 pub struct PgWire {

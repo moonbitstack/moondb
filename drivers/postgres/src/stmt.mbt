@@ -24,14 +24,27 @@ pub struct PgStmt {
   slots : Array[String]
   mut params : Array[Value]
   mut closed : Bool
+  // The result's shape, described once here: the column names, their type OIDs and
+  // the format each is bound in. A text handle leaves all three empty and reads the
+  // shape from the portal Describe the server answers instead.
+  col_names : Array[String]
+  col_oids : Array[Int32]
+  formats : Array[Int32]
+  binary : Bool
 }
 
 ///|
 /// Parse `sql` on the server (or reuse the cached statement with the same text) and
 /// return the handle.
+///
+/// `binary` fixes the result format for the handle's whole life: each column is
+/// described once at prepare time and then bound in whichever format reads back the
+/// same value — binary where that is exact, text otherwise. A handle therefore pays
+/// for the description once instead of on every call, unlike [`PgConn::query`].
 pub async fn PgConn::prepare_stmt(
   self : PgConn,
   sql : String,
+  binary~ : Bool = false,
 ) -> PgStmt raise DbError {
   if self.closed {
     raise @moondb.Closed
@@ -49,10 +62,23 @@ pub async fn PgConn::prepare_stmt(
   }
   let key = translated
   let (name, fresh) = self.statement_for(key, translated)
-  if fresh {
-    self.write_all(build_parse_named(name, translated))
-    self.write_all(build_sync())
-    self.read_until_ready()
+  let mut described = ResultPlan::empty()
+  if fresh || binary {
+    let mut batch = if fresh {
+      build_parse_named(name, translated)
+    } else {
+      b""
+    }
+    if binary {
+      batch = concat_bytes(batch, build_describe_statement(name))
+    }
+    batch = concat_bytes(batch, build_sync())
+    self.write_all(batch)
+    if binary {
+      described = self.read_describe().chosen()
+    } else {
+      self.read_until_ready()
+    }
   }
   {
     conn: self,
@@ -63,6 +89,10 @@ pub async fn PgConn::prepare_stmt(
     slots: named.slots,
     params: [],
     closed: false,
+    col_names: described.names,
+    col_oids: described.oids,
+    formats: described.formats,
+    binary,
   }
 }
 
@@ -96,6 +126,8 @@ fn PgStmt::ensure_open(self : PgStmt) -> Unit raise DbError {
 
 ///|
 /// Send `Bind`/`Describe`/`Execute`/`Sync` for this statement and read the response.
+/// A binary handle carries its own plan, so it skips the portal Describe: the
+/// description taken at prepare already names the columns.
 async fn PgStmt::run(self : PgStmt) -> QueryOutcome raise DbError {
   self.ensure_open()
   if self.conn.closed {
@@ -106,12 +138,34 @@ async fn PgStmt::run(self : PgStmt) -> QueryOutcome raise DbError {
       "a query stream is still open on this connection; drain it or call close() first",
     )
   }
-  let mut batch = build_bind_named("", self.name, self.params)
-  batch = concat_bytes(batch, build_describe_portal())
+  let mut batch = build_bind_named(
+    "",
+    self.name,
+    self.params,
+    formats=self.formats,
+  )
+  if !self.binary {
+    batch = concat_bytes(batch, build_describe_portal())
+  }
   batch = concat_bytes(batch, build_execute())
   batch = concat_bytes(batch, build_sync())
   self.conn.write_all(batch)
-  self.conn.read_results()
+  self.conn.read_results(self.plan())
+}
+
+///|
+/// The description this handle's results are read with, or `None` for a text handle
+/// that relies on the portal Describe.
+fn PgStmt::plan(self : PgStmt) -> ResultPlan? {
+  if self.binary {
+    Some(ResultPlan::{
+      names: self.col_names,
+      oids: self.col_oids,
+      formats: self.formats,
+    })
+  } else {
+    None
+  }
 }
 
 ///|
@@ -145,13 +199,26 @@ impl @moondb.AsyncStmt for PgStmt with fn query_stream(self) {
       "a query stream is still open on this connection; drain it or call close() first",
     )
   }
-  let mut batch = build_bind_named("", self.name, self.params)
-  batch = concat_bytes(batch, build_describe_portal())
+  let mut batch = build_bind_named(
+    "",
+    self.name,
+    self.params,
+    formats=self.formats,
+  )
+  if !self.binary {
+    batch = concat_bytes(batch, build_describe_portal())
+  }
   batch = concat_bytes(batch, build_execute())
   batch = concat_bytes(batch, build_sync())
   self.conn.write_all(batch)
   self.conn.streaming = true
-  PgRowStream::{ conn: self.conn, col_names: [], col_oids: [], done: false, }
+  {
+    conn: self.conn,
+    col_names: self.col_names,
+    col_oids: self.col_oids,
+    formats: self.formats,
+    done: false,
+  }
 }
 
 ///|

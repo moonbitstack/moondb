@@ -174,11 +174,14 @@ pub fn build_bind(params : Array[Value]) -> Bytes {
 
 ///|
 /// Bind ('B') `params` to a named (or unnamed) prepared statement, producing a
-/// named (or unnamed) portal. All parameters and result columns use text format.
+/// named (or unnamed) portal. Parameters always go as text; `formats` says, one
+/// entry per result column, whether that column comes back in binary (`1`) or text
+/// (`0`). An empty `formats` is the protocol's own spelling of "all text".
 pub fn build_bind_named(
   portal : String,
   statement : String,
   params : Array[Value],
+  formats~ : Array[Int32] = [],
 ) -> Bytes {
   let w = MsgWriter::new()
   w.cstring(portal)
@@ -194,7 +197,10 @@ pub fn build_bind_named(
       }
     }
   }
-  w.i16(0) // zero result format codes ⇒ all text
+  w.i16(formats.length()) // one per result column, or none for all text
+  for f in formats {
+    w.i16(f)
+  }
   frame(b'B', w.to_bytes())
 }
 
@@ -218,6 +224,17 @@ pub fn build_describe_portal() -> Bytes {
   let w = MsgWriter::new()
   w.byte(b'P') // 'P' = portal (vs 'S' = statement)
   w.cstring("")
+  frame(b'D', w.to_bytes())
+}
+
+///|
+/// Describe ('D') a prepared statement, which answers with its parameter types and
+/// a RowDescription. That description is what a binary result needs before the Bind:
+/// the format code of each result column is chosen from its type.
+pub fn build_describe_statement(name : String) -> Bytes {
+  let w = MsgWriter::new()
+  w.byte(b'S') // 'S' = statement (vs 'P' = portal)
+  w.cstring(name)
   frame(b'D', w.to_bytes())
 }
 

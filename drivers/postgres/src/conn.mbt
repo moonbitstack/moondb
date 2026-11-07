@@ -290,12 +290,50 @@ priv struct QueryOutcome {
 }
 
 ///|
+/// How to read one result: the column names and type OIDs a RowDescription reports,
+/// plus the format each column arrives in (`0` text, `1` binary).
+///
+/// A text result carries its own RowDescription on the wire, so the plan starts empty
+/// and is filled from the message. A binary result is bound with per-column formats
+/// chosen from the types, and the server then sends no RowDescription at all — the
+/// plan made from the statement's description is the only record of how to read the
+/// cells, since a DataRow is just bytes with no type of its own.
+priv struct ResultPlan {
+  names : Array[String]
+  oids : Array[Int32]
+  formats : Array[Int32]
+}
+
+///|
+fn ResultPlan::empty() -> ResultPlan {
+  { names: [], oids: [], formats: [], }
+}
+
+///|
+/// The format codes to bind for the described columns: binary where the binary cell
+/// decodes to exactly what the text cell would, text everywhere else.
+fn ResultPlan::chosen(desc : ResultPlan) -> ResultPlan {
+  {
+    names: desc.names,
+    oids: desc.oids,
+    formats: desc.oids.map(fn(oid) { if uses_binary(oid) { 1 } else { 0 } }),
+  }
+}
+
+///|
 /// Read backend messages after a query has been sent, materialising every
-/// DataRow against the latest RowDescription, until `ReadyForQuery`.
-async fn PgConn::read_results(self : PgConn) -> QueryOutcome raise DbError {
+/// DataRow against the latest RowDescription, until `ReadyForQuery`. `plan` is the
+/// description a binary result was bound with; a text result passes `None` and takes
+/// the RowDescription the server sends.
+async fn PgConn::read_results(
+  self : PgConn,
+  plan : ResultPlan?,
+) -> QueryOutcome raise DbError {
   let rows : Array[Row] = []
-  let mut col_names : Array[String] = []
-  let mut col_oids : Array[Int32] = []
+  let mut described = match plan {
+    Some(p) => p
+    None => ResultPlan::empty()
+  }
   let mut command_tag = ""
   for ;; {
     let (tag, payload) = self.read_message()
@@ -308,8 +346,7 @@ async fn PgConn::read_results(self : PgConn) -> QueryOutcome raise DbError {
         match parsed {
           Ok(info) => {
             let (names, oids) = info
-            col_names = names
-            col_oids = oids
+            described = { names, oids, formats: described.formats, }
           }
           Err(e) => {
             self.drain_until_ready()
@@ -319,7 +356,14 @@ async fn PgConn::read_results(self : PgConn) -> QueryOutcome raise DbError {
       }
       // 'D' DataRow
       68 => {
-        let parsed = Ok(parse_data_row(payload, col_names, col_oids)) catch {
+        let parsed = Ok(
+          parse_data_row(
+            payload,
+            described.names,
+            described.oids,
+            formats=described.formats,
+          ),
+        ) catch {
           e => Err(e)
         }
         match parsed {
@@ -391,12 +435,14 @@ fn parse_row_description(
 
 ///|
 /// Decode a DataRow ('D') payload against the current column names/OIDs into a
-/// [`Row`]. Each cell is a length-prefixed text value (length `-1` ⇒ `NULL`),
-/// decoded by [`decode_value`] using its column's type OID.
+/// [`Row`]. Each cell is a length-prefixed value (length `-1` ⇒ `NULL`); a cell of
+/// a column whose entry in `formats` is `1` is binary and goes through
+/// [`decode_binary`], everything else is UTF-8 text decoded by [`decode_value`].
 fn parse_data_row(
   payload : Bytes,
   col_names : Array[String],
   col_oids : Array[Int32],
+  formats~ : Array[Int32] = [],
 ) -> Row raise DbError {
   let r = ByteReader::new(payload)
   let count = r.i16()
@@ -406,9 +452,13 @@ fn parse_data_row(
     if cell_len < 0 {
       values.push(@moondb.Null)
     } else {
-      let raw = utf8_decode(r.take(cell_len))
       let oid = if i < col_oids.length() { col_oids[i] } else { 0 }
-      values.push(decode_value(oid, false, raw))
+      let binary = i < formats.length() && formats[i] == 1
+      if binary {
+        values.push(decode_binary(oid, r.take(cell_len)))
+      } else {
+        values.push(decode_value(oid, false, utf8_decode(r.take(cell_len))))
+      }
     }
   }
   @moondb.Row::{ columns: col_names, values, }
@@ -428,15 +478,21 @@ async fn PgConn::drain_until_ready(self : PgConn) -> Unit raise DbError {
 
 ///|
 /// Run a row-returning statement and materialise every row. Uses the simple
-/// Query protocol when `params` is empty, and the extended Parse/Bind/Execute
-/// protocol (with `?`→`$n` translation and out-of-band text-format binding)
-/// when parameters are supplied.
+/// Query protocol when `params` is empty and the result is text, and the extended
+/// Parse/Bind/Execute protocol (with `?`→`$n` translation and out-of-band text-format
+/// binding) otherwise.
+///
+/// With `binary`, each result column whose type has an exact binary decoder is
+/// fetched in the binary format and the rest stay text — see [`decode_binary`]. Text
+/// is the default, and a binary result costs one extra round trip per call: the
+/// column types have to be described before the Bind can name a format for each.
 pub async fn PgConn::query(
   self : PgConn,
   sql : String,
   params : Array[Value],
+  binary~ : Bool = false,
 ) -> Array[Row] raise DbError {
-  self.run_statement(sql, params).rows
+  self.run_statement(sql, params, binary~).rows
 }
 
 ///|
@@ -456,15 +512,21 @@ pub async fn PgConn::execute(
 }
 
 ///|
-/// Send a statement on the wire: the simple Query protocol when `params` is empty,
-/// otherwise the extended Parse/Bind/Describe/Execute/Sync batch (with `?`→`$n`
-/// translation and out-of-band text binding). The response is left on the socket
-/// for [`read_results`] or a [`PgRowStream`] to consume.
+/// Send a statement on the wire and report how its rows must be read, if that is not
+/// the text RowDescription the server sends with them. The response is left on the
+/// socket for [`read_results`] or a [`PgRowStream`] to consume.
+///
+/// A binary result is two batches: `Parse` (when the text is new) plus `Describe` of
+/// the statement, whose RowDescription names the column types that decide the
+/// formats; then `Bind` with those format codes, `Execute` and `Sync`. The Describe is
+/// what makes the second batch possible, and it is why a binary query is one round
+/// trip more expensive than a text one.
 async fn PgConn::send_statement(
   self : PgConn,
   sql : String,
   params : Array[Value],
-) -> Unit raise DbError {
+  binary~ : Bool = false,
+) -> ResultPlan? raise DbError {
   if self.closed {
     raise @moondb.Closed
   }
@@ -473,23 +535,69 @@ async fn PgConn::send_statement(
       "a query stream is still open on this connection; drain it or call close() before the next statement",
     )
   }
-  if params.length() == 0 {
+  if params.length() == 0 && !binary {
     self.write_all(build_query(sql))
-  } else {
-    let translated = translate_placeholders(sql)
-    let (name, fresh) = self.statement_for(sql, translated)
-    // Parse only the first time this SQL is seen; later calls Bind the cached
-    // named statement. The unnamed portal carries this call's parameters.
-    let mut batch = if fresh {
-      build_parse_named(name, translated)
-    } else {
-      b""
-    }
-    batch = concat_bytes(batch, build_bind_named("", name, params))
-    batch = concat_bytes(batch, build_describe_portal())
-    batch = concat_bytes(batch, build_execute())
+    return None
+  }
+  let translated = translate_placeholders(sql)
+  let (name, fresh) = self.statement_for(sql, translated)
+  // Parse only the first time this SQL is seen; later calls Bind the cached
+  // named statement. The unnamed portal carries this call's parameters.
+  let mut batch = if fresh { build_parse_named(name, translated) } else { b"" }
+  if binary {
+    batch = concat_bytes(batch, build_describe_statement(name))
     batch = concat_bytes(batch, build_sync())
     self.write_all(batch)
+    let described = self.read_describe().chosen()
+    let mut bind = build_bind_named("", name, params, formats=described.formats)
+    bind = concat_bytes(bind, build_execute())
+    bind = concat_bytes(bind, build_sync())
+    self.write_all(bind)
+    return Some(described)
+  }
+  batch = concat_bytes(batch, build_bind_named("", name, params))
+  batch = concat_bytes(batch, build_describe_portal())
+  batch = concat_bytes(batch, build_execute())
+  batch = concat_bytes(batch, build_sync())
+  self.write_all(batch)
+  None
+}
+
+///|
+/// Send a batch that ends in `Sync` and read the RowDescription out of the answer:
+/// the statement's column names and type OIDs, or an empty plan for a statement
+/// without result columns. Consumes everything up to `ReadyForQuery`.
+async fn PgConn::read_describe(self : PgConn) -> ResultPlan raise DbError {
+  let mut plan = ResultPlan::empty()
+  for ;; {
+    let (tag, payload) = self.read_message()
+    match tag {
+      // 'T' RowDescription
+      84 => {
+        let parsed = Ok(parse_row_description(payload)) catch { e => Err(e) }
+        match parsed {
+          Ok(info) => {
+            let (names, oids) = info
+            plan = ResultPlan::{ names, oids, formats: [], }
+          }
+          Err(e) => {
+            self.drain_until_ready()
+            raise e
+          }
+        }
+      }
+      // 'E' ErrorResponse
+      69 => {
+        let detail = parse_error_detail(payload)
+        self.drain_until_ready()
+        raise @moondb.Server(detail)
+      }
+      // 'Z' ReadyForQuery
+      90 => return plan
+      // '1' ParseComplete / '2' BindComplete / 't' ParameterDescription /
+      // 'n' NoData / 'S' ParameterStatus / 'N' NoticeResponse
+      _ => ()
+    }
   }
 }
 
@@ -518,9 +626,10 @@ async fn PgConn::run_statement(
   self : PgConn,
   sql : String,
   params : Array[Value],
+  binary~ : Bool = false,
 ) -> QueryOutcome raise DbError {
-  self.send_statement(sql, params)
-  self.read_results()
+  let plan = self.send_statement(sql, params, binary~)
+  self.read_results(plan)
 }
 
 ///|
@@ -532,21 +641,34 @@ async fn PgConn::run_statement(
 /// statement runs on that connection.
 pub struct PgRowStream {
   conn : PgConn
+  // The result's column names, type OIDs and per-column formats. A text stream
+  // fills them from the RowDescription the server sends; a binary stream is given
+  // them up front, because a binary result carries no RowDescription.
   mut col_names : Array[String]
   mut col_oids : Array[Int32]
+  formats : Array[Int32]
   mut done : Bool
 }
 
 ///|
 /// Send `sql` (with bound `params`) and return a streaming cursor over its rows.
+/// `binary` asks for the same per-type binary result [`query`] does.
 pub async fn PgConn::query_stream(
   self : PgConn,
   sql : String,
   params : Array[Value],
+  binary~ : Bool = false,
 ) -> PgRowStream raise DbError {
-  self.send_statement(sql, params)
+  let plan = self.send_statement(sql, params, binary~)
   self.streaming = true
-  { conn: self, col_names: [], col_oids: [], done: false, }
+  let described = plan.unwrap_or(ResultPlan::empty())
+  {
+    conn: self,
+    col_names: described.names,
+    col_oids: described.oids,
+    formats: described.formats,
+    done: false,
+  }
 }
 
 ///|
@@ -581,7 +703,14 @@ pub async fn PgRowStream::next(self : PgRowStream) -> Row? raise DbError {
       }
       // 'D' DataRow
       68 => {
-        let parsed = Ok(parse_data_row(payload, self.col_names, self.col_oids)) catch {
+        let parsed = Ok(
+          parse_data_row(
+            payload,
+            self.col_names,
+            self.col_oids,
+            formats=self.formats,
+          ),
+        ) catch {
           e => Err(e)
         }
         match parsed {
@@ -963,7 +1092,7 @@ pub async fn PgConn::copy_out_stream(
       "a stream is still open on this connection; drain it or call close() first",
     )
   }
-  self.send_statement(sql, [])
+  self.send_statement(sql, []) |> ignore
   self.streaming = true
   { conn: self, done: false, rows: 0, }
 }
@@ -1073,7 +1202,7 @@ pub async fn PgConn::copy_in_stream(
       "a stream is still open on this connection; drain it or call close() first",
     )
   }
-  self.send_statement(sql, [])
+  self.send_statement(sql, []) |> ignore
   let (tag, payload) = self.read_message()
   match tag {
     // 'G' CopyInResponse — the server is ready for CopyData.

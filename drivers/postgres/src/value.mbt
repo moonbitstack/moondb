@@ -1,9 +1,10 @@
 // Copyright 2026 Leo Cheng
 // SPDX-License-Identifier: Apache-2.0
 
-// Type-value round-tripping in the wire's *text* format. This round binds and
-// decodes everything as text (result format code 0); binary format is a later
-// round (README roadmap). PostgreSQL type OIDs are stable, well-known integers.
+// Type-value round-tripping in the wire's *text* format, which is the default for
+// both directions. Parameters are always bound as text; results are text unless the
+// caller asks for binary, and then only the types binary.mbt can reproduce exactly.
+// PostgreSQL type OIDs are stable, well-known integers.
 
 ///|
 /// The `pg_type` OID of `bool`, as a column description reports it.
@@ -12,6 +13,10 @@ pub const OID_BOOL : Int32 = 16
 ///|
 /// The `pg_type` OID of `bytea`, as a column description reports it.
 pub const OID_BYTEA : Int32 = 17
+
+///|
+/// The `pg_type` OID of `name` (an identifier column).
+pub const OID_NAME : Int32 = 19
 
 ///|
 /// The `pg_type` OID of `int8`, as a column description reports it.
@@ -40,6 +45,14 @@ pub const OID_JSON : Int32 = 114
 ///|
 /// The `pg_type` OID of `jsonb`.
 pub const OID_JSONB : Int32 = 3802
+
+///|
+/// The `pg_type` OID of `char(n)` (blank-padded).
+pub const OID_BPCHAR : Int32 = 1042
+
+///|
+/// The `pg_type` OID of `varchar`.
+pub const OID_VARCHAR : Int32 = 1043
 
 ///|
 /// The `pg_type` OID of `date`.
@@ -178,19 +191,17 @@ fn decode_uuid(raw : String) -> Bytes {
 ///|
 /// PostgreSQL renders a timestamp with a space between date and time; the ISO-8601
 /// text `Value::Time` carries uses `T`.
+///
+/// Only the separator becomes `T`. A date's era suffix is a space as well
+/// (`0001-01-01 BC`), and turning that into `0001-01-01TBC` invents a time of day that
+/// the binary decode of the same date would not produce.
 fn normalize_timestamp(raw : String) -> String {
-  let sb = StringBuilder()
-  let mut done = false
-  for i in 0..<raw.length() {
-    let c = raw[i]
-    if !done && c.to_int() == 32 {
-      sb.write_char('T')
-      done = true
-    } else {
-      sb.write_char(c.unsafe_to_char())
-    }
+  let n = raw.length()
+  if n > 11 && raw[10].to_int() == 32 && raw[11] >= '0' && raw[11] <= '9' {
+    raw[0:10].to_owned() + "T" + raw[11:n].to_owned()
+  } else {
+    raw
   }
-  sb.to_string()
 }
 
 ///|
@@ -440,8 +451,13 @@ pub fn parse_int64(s : String) -> Int64? {
 
 ///|
 /// Parse a floating-point literal from PostgreSQL text (`123.45`, `-1e10`,
-/// `Infinity`, `NaN`), or `None` if malformed. Handles sign, fraction, and a
-/// base-10 exponent; the special IEEE tokens PostgreSQL emits are recognised.
+/// `Infinity`, `NaN`), or `None` if malformed.
+///
+/// The three special tokens PostgreSQL emits are handled here; everything else goes
+/// to the language runtime's decimal-to-binary conversion, which rounds once and
+/// correctly. A hand-rolled `mantissa × 10^exponent` loop would not: multiplying by
+/// ten three hundred times drifts by several ULP, and `1e300` would come back as the
+/// double next to it — a value that then differs from the same column read in binary.
 pub fn parse_double(s : String) -> Double? {
   match s {
     "NaN" => return Some(@double.not_a_number)
@@ -449,67 +465,11 @@ pub fn parse_double(s : String) -> Double? {
     "-Infinity" => return Some(@double.neg_infinity)
     _ => ()
   }
-  let n = s.length()
-  if n == 0 {
-    return None
+  let parsed = Ok(@string.parse_double(s[:])) catch { _ => Err(()) }
+  match parsed {
+    Ok(d) => Some(d)
+    Err(_) => None
   }
-  let mut i = 0
-  let mut neg = false
-  if s[0] == '-' {
-    neg = true
-    i = 1
-  } else if s[0] == '+' {
-    i = 1
-  }
-  let mut int_part : Double = 0.0
-  let mut saw_digit = false
-  while i < n && s[i] >= '0' && s[i] <= '9' {
-    int_part = int_part * 10.0 + (s[i].to_int() - 48).to_double()
-    saw_digit = true
-    i += 1
-  }
-  let mut frac : Double = 0.0
-  let mut scale : Double = 1.0
-  if i < n && s[i] == '.' {
-    i += 1
-    while i < n && s[i] >= '0' && s[i] <= '9' {
-      frac = frac * 10.0 + (s[i].to_int() - 48).to_double()
-      scale = scale * 10.0
-      saw_digit = true
-      i += 1
-    }
-  }
-  if !saw_digit {
-    return None
-  }
-  let mut mantissa = int_part + frac / scale
-  if i < n && (s[i] == 'e' || s[i] == 'E') {
-    i += 1
-    let mut exp_neg = false
-    if i < n && s[i] == '-' {
-      exp_neg = true
-      i += 1
-    } else if i < n && s[i] == '+' {
-      i += 1
-    }
-    if i >= n {
-      return None
-    }
-    let mut exp = 0
-    while i < n && s[i] >= '0' && s[i] <= '9' {
-      exp = exp * 10 + (s[i].to_int() - 48)
-      i += 1
-    }
-    let mut factor : Double = 1.0
-    for _j in 0..<exp {
-      factor = factor * 10.0
-    }
-    mantissa = if exp_neg { mantissa / factor } else { mantissa * factor }
-  }
-  if i != n {
-    return None
-  }
-  Some(if neg { -mantissa } else { mantissa })
 }
 
 ///|
