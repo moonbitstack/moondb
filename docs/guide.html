@@ -195,6 +195,7 @@ caps.server_cursors <span class="kw">//</span> a cursor the server holds open
 caps.streaming_copy <span class="kw">//</span> COPY in both directions, chunk by chunk
 caps.unsigned_integers <span class="kw">//</span> an unsigned 64-bit column keeps its value</pre>
           <p class="muted">A query layer reads these once and lowers its plan, instead of discovering a missing feature mid-statement. <code class="inline">@moondb.Executor::new(conn)</code> is the narrower view: run SQL, but no <code class="inline">close</code> and no transaction — the handle a repository method should receive.</p>
+          <p class="muted">Two things a driver offers on top of the trait are its own calls, because they change how a value crosses the wire rather than what the contract can express. moonpostgres takes <code class="inline">binary = true</code> on a query and answers each column in PostgreSQL's binary format, chosen per column from its type; text stays the default, and a prepared handle describes the columns once. moonmysql streams a parameter of a mebibyte or more with <code class="inline">COM_STMT_SEND_LONG_DATA</code>, so a value larger than <code class="inline">max_allowed_packet</code> still binds — no flag, no call-site change. Each driver's page has the details.</p>
         </section>
 
         <section class="section" id="defaults">

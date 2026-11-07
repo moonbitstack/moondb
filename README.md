@@ -7,7 +7,7 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-278%20passing-2ea44f)](#tests)
+[![tests](https://img.shields.io/badge/tests-294%20passing-2ea44f)](#tests)
 [![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -239,6 +239,7 @@ test "a repository only needs to run SQL" {
 
 A backend implements the `Driver` trait: the four data operations, the three transaction brackets, `close`, and the two introspection methods `dialect` and `capabilities`. `query_stream`, `ping` and `prepare` have defaults, so a minimal driver is short. `DbError` is `pub(all)`, so a driver in its own package can construct and raise every case:
 
+<!-- nocheck -->
 ```moonbit
 pub impl @moondb.Driver for MyConn with fn dialect(_self) { @moondb.Dialect::Sqlite }
 
@@ -277,8 +278,10 @@ pub impl @moondb.Driver for MyConn with fn execute(self, sql, params) {
 | Multiple result sets | no | yes | yes |
 | Unsigned 64-bit | no | no | yes |
 | `RETURNING` | yes | yes | no |
+| Binary result format | — | opt-in, per column | prepared statements |
+| Long parameters (streamed) | — | — | yes, past 1 MiB |
 
-A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement.
+A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement. Binary results and streamed parameters are driver-level choices rather than contract ones: they change how a value crosses the wire, not what the trait can express, so each driver exposes them on its own calls.
 
 ## Tests
 

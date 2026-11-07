@@ -1,6 +1,6 @@
 ---
 name: moondb
-description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or MySQL through the moondb interface — running queries, binding values by name, reusing a prepared statement, nesting transactions, or asking a backend what it supports. Covers the Driver/AsyncDriver contract, Stmt, Txn, Dialect and Capabilities.
+description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or MySQL through the moondb interface — running queries, binding values by name, reusing a prepared statement, nesting transactions, asking a backend what it supports, reading a result in the binary format, or sending a value larger than a packet. Covers the Driver/AsyncDriver contract, Stmt, Txn, Dialect and Capabilities.
 ---
 
 # moondb
@@ -18,9 +18,13 @@ moon add moonbitstack/moondb
 moon add moonbitstack/moonsqlite       # or moonpostgres / moonmysql
 ```
 
+Each driver package opens its own connection. This block names the three entry
+points; it is not compiled here, because this package does not depend on them.
+
+<!-- nocheck -->
 ```moonbit
 let db = @sqlite.SqliteDriver::open(":memory:")
-// or: @postgres.PgConn::connect(host, port, user, password, database).await()
+// or: @postgres.PgConn::connect(host, port, user, password, database)
 // or: @mysql.MysqlDriver::new(user="app", password="secret", database="app")
 ```
 
@@ -28,6 +32,14 @@ A wire driver is asynchronous: `PgConn` and `MysqlConn` implement
 `@moondb.AsyncDriver`, so every call is awaited. `MysqlDriver` (the synchronous
 adapter) reconnects per call, so it cannot hold a transaction — use `MysqlConn`
 for that.
+
+Everything below is written against `@moondb.MockDriver`, the reference driver
+that ships in this package, so the examples compile as written. Substitute a real
+driver and the same code runs against a database.
+
+```moonbit
+let db = @moondb.MockDriver::new()
+```
 
 ## Run a statement
 
@@ -39,16 +51,28 @@ PostgreSQL).
 let inserted = db.execute("INSERT INTO hero (id, name) VALUES (?, ?)", [
   @moondb.Value::Int(1), @moondb.Value::Text("Nova"),
 ])
-let rows = db.query("SELECT id, name FROM hero WHERE id > ?", [@moondb.Value::Int(0)])
-let name = rows[0].text_by("name")     // typed accessor; raises TypeError on a mismatch
-let age : Int? = rows[0].read_by("age") // NULL reads into an option
+let rows = db.query("SELECT id, name FROM hero WHERE id > ?", [
+  @moondb.Value::Int(0),
+])
+let id = rows[0].int(0) // typed accessor; raises TypeError on a mismatch
+```
+
+Read a nullable column as an option, or by name:
+
+```moonbit
+let row : @moondb.Row = {
+  columns: ["id", "age"],
+  values: [@moondb.Value::Int(1), @moondb.Value::Null],
+}
+let age : Int? = row.read_by("age")
+let name = row.text(0)
 ```
 
 Stream instead of materialising when the result is large:
 
 ```moonbit
 let cursor = db.query_stream("SELECT id FROM hero", [])
-while cursor.next() is Some(row) {
+while cursor.next() is Some(cell) {
   // one row at a time
 }
 cursor.close()
@@ -68,7 +92,7 @@ let q = @moondb.rewrite_named(
 let args : Map[String, @moondb.Value] = Map([])
 args.set("id", @moondb.Value::Int(7))
 args.set("realm", @moondb.Value::Text("north"))
-let rows = db.query(q.sql, q.bind(args))
+let named = db.query(q.sql, q.bind(args))
 ```
 
 A driver's `prepare` does the same rewrite itself, so a prepared handle takes a
@@ -78,11 +102,11 @@ map directly through `bind_named`.
 
 ```moonbit
 let stmt = db.prepare("INSERT INTO hero (id, name) VALUES (:id, :name)")
-let args : Map[String, @moondb.Value] = Map([])
-args.set("id", @moondb.Value::Int(1))
-args.set("name", @moondb.Value::Text("Nova"))
-stmt.bind_named(args)
-stmt.execute()
+let slots : Map[String, @moondb.Value] = Map([])
+slots.set("id", @moondb.Value::Int(1))
+slots.set("name", @moondb.Value::Text("Nova"))
+stmt.bind_named(slots)
+stmt.execute() |> ignore
 stmt.close()
 ```
 
@@ -97,7 +121,9 @@ failure undoes only its own level. `AsyncTxn` is the awaited twin.
 ```moonbit
 let tx = @moondb.Txn::new(db)
 tx.run(fn(tx) raise @moondb.DbError {
-  tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [Int(1), Text("Nova")])
+  tx.driver().execute("INSERT INTO hero VALUES (?, ?)", [
+    @moondb.Value::Int(1), @moondb.Value::Text("Nova"),
+  ])
   |> ignore
 })
 ```
@@ -117,6 +143,33 @@ if db.capabilities().server_cursors {
 }
 ```
 
+## Two things the drivers do beyond the trait
+
+Both are driver calls, not part of `Driver`: they change how a value crosses the
+wire, not what the contract can express. Neither needs anything from the caller
+beyond the argument.
+
+<!-- nocheck -->
+```moonbit
+// moonpostgres: results are text by default; `binary = true` asks for the binary
+// format, chosen per column from its type. int4, int8, numeric, uuid, bytea, the
+// date and time types, json and arrays come back binary; float4 and timestamptz
+// stay text, because their binary form would not read back as the same value.
+let rows = pg.query("SELECT id, at FROM hero", [], binary = true)
+
+// moonmysql: a parameter of a mebibyte or more is streamed with
+// COM_STMT_SEND_LONG_DATA instead of riding inside the execute packet, so a value
+// larger than `max_allowed_packet` still binds. Nothing to opt into.
+mysql.execute("INSERT INTO asset VALUES (?, ?)", [
+  @moondb.Value::Int(1), @moondb.Value::Blob(raw),
+])
+```
+
+On PostgreSQL, asking for binary costs one extra round trip per call, because the
+column types have to be described before the bind can choose a format for each. A
+prepared handle — `conn.prepare_stmt(sql, binary = true)` — describes once at
+prepare time and pays nothing per run.
+
 ## Gotchas
 
 - `execute` is for statements that return no rows; a row-returning statement
@@ -129,3 +182,7 @@ if db.capabilities().server_cursors {
   the connection first makes them raise `Closed`.
 - `Txn::run` takes a body that raises `@moondb.DbError`; do not call `assert_*`
   inside it (those raise `Error` and widen the body's error type).
+- Binary results and text results are the same values by construction on
+  PostgreSQL; on MySQL a `FLOAT` column is the one type whose two protocols differ,
+  because the text protocol renders six significant digits. Read `FLOAT` through a
+  prepared statement when the exact 32-bit value matters.
