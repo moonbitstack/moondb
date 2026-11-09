@@ -5,3 +5,6 @@
 .git/
 _build/
 target/
+# The drivers are modules of their own and publish from there.
+drivers/
+moon.work

@@ -90,6 +90,9 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match moon.mod version $version"; exit 1
           fi
 
+      # A driver publishes from a copy outside the workspace. Inside it, the root `.moonignore`
+      # that keeps drivers/ out of moondb's package also empties the driver's; outside it, the
+      # check before publishing resolves moondb from mooncakes, as the driver's users will.
       - name: publish
         env:
           CREDENTIALS: ${{ secrets.MOONCAKES_CREDENTIALS }}
@@ -97,6 +100,10 @@ jobs:
           if [ -z "$CREDENTIALS" ]; then echo "::error::MOONCAKES_CREDENTIALS is not available"; exit 1; fi
           trap 'rm -f ~/.moon/credentials.json' EXIT
           printf '%s' "$CREDENTIALS" > ~/.moon/credentials.json
+          if [ "$PWD" != "$GITHUB_WORKSPACE" ]; then
+            cp -r . "$RUNNER_TEMP/module"
+            cd "$RUNNER_TEMP/module"
+          fi
           moon update
           moon publish
 
