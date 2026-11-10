@@ -63,8 +63,8 @@ moon add moonbitstack/moondb
 | [`AsyncDriver`](#asyncdriver) | the same contract for a backend reached over a socket, every method awaited | asyncpg / `asyncio` DB-API |
 | [`AsyncCursor`](#asyncdriver) | forward-only cursor whose `next` is awaited, for a wire driver's live rows | — |
 | [`MockDriver`](#mockdriver) | dependency-free in-memory reference driver, for tests | — |
-| [`@blocking.Blocking`](blocking/) | a synchronous driver presented as an `AsyncDriver`, in `moonbitstack/moondb/blocking` | — |
-| [`@conformance.Report`](conformance/) | the contract as a case matrix any driver answers, in `moonbitstack/moondb/conformance` | — |
+| [`@blocking.Blocking`](docs/api.html#blocking) | a synchronous driver presented as an `AsyncDriver`, in `moonbitstack/moondb/blocking` | — |
+| [`@conformance.Report`](docs/api.html#conformance) | the contract as a case matrix any driver answers, in `moonbitstack/moondb/conformance` | — |
 | [`Dialect`](#dialects-and-capabilities) | `Sqlite` / `Postgres` / `Mysql`, and the placeholder each spells | — |
 | [`Capabilities`](#dialects-and-capabilities) | what a backend can do beyond the base contract | — |
 | [`QueryExecutor`](#the-narrow-view) | the part of a driver that runs SQL, without the part that owns the connection | Go `Queryer` context, SQLAlchemy `Connection.exec_driver_sql` |
