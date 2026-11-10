@@ -1,0 +1,13 @@
+// A driver-neutral conformance suite: the case matrix every backend must survive,
+// written once against the `AsyncDriver` seam, so a new driver is measured by the
+// same yardstick as the ones in this repository. The interface is its only runtime
+// dependency.
+import {
+  "moonbitstack/moondb",
+  "moonbitstack/moondb/blocking",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitstack/moondb",
+} for "test"

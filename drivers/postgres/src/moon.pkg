@@ -30,4 +30,5 @@ import {
 import {
   "moonbitstack/mooncred/x509",
   "moonbitstack/moondb/apool",
+  "moonbitstack/moondb/conformance",
 } for "wbtest"

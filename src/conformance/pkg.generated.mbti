@@ -1,0 +1,50 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moondb/conformance"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitstack/moondb",
+}
+
+// Values
+pub async fn check(&@moondb.AsyncDriver, table? : String) -> Report
+
+pub async fn[T : @moondb.Driver] check_blocking(T, table? : String) -> Report
+
+// Errors
+
+// Types and methods
+#derive(@debug.Debug)
+pub(all) struct Case {
+  name : String
+  outcome : Outcome
+}
+pub fn Case::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Outcome {
+  Passed
+  Failed(String)
+  Skipped(String)
+}
+pub fn Outcome::equal(Self, Self) -> Bool
+pub fn Outcome::not_equal(Self, Self) -> Bool
+pub fn Outcome::to_repr(Self) -> @debug.Repr
+
+#derive(@debug.Debug)
+pub(all) struct Report {
+  cases : Array[Case]
+}
+pub fn Report::failed(Self) -> Int32
+pub fn Report::failures(Self) -> Array[String]
+pub fn Report::is_clean(Self) -> Bool
+pub fn Report::passed(Self) -> Int32
+pub fn Report::skipped(Self) -> Int32
+pub fn Report::skips(Self) -> Array[String]
+pub fn Report::summary(Self) -> String
+pub fn Report::to_repr(Self) -> @debug.Repr
+pub fn Report::total(Self) -> Int32
+
+// Type aliases
+
+// Traits
