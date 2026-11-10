@@ -11,6 +11,7 @@ license = "Apache-2.0"
 keywords = [
   "mysql",
   "mariadb",
+  "tidb",
   "driver",
   "database",
   "sql",

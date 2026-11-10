@@ -11,6 +11,7 @@ license = "Apache-2.0"
 keywords = [
   "postgres",
   "postgresql",
+  "cockroachdb",
   "pg",
   "driver",
   "database",
