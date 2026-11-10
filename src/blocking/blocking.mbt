@@ -2,33 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 ///|
-/// A [`@moondb.Driver`] seen as an [`@moondb.AsyncDriver`], so a backend whose work happens inside
-/// a C call can be handed to code written against the asynchronous seam — the
-/// checkpoint store of an agent framework, a retrieval index, a server that runs
-/// one event loop for every dependency.
+/// A [`@moondb.Driver`] seen as an [`@moondb.AsyncDriver`], so a backend whose work
+/// happens inside a C call can be handed to code written against the asynchronous
+/// seam — the checkpoint store of an agent framework, a retrieval index, a server that
+/// runs one event loop for every dependency.
 ///
-/// The two traits are method-for-method identical, so the bridge is a delegation
-/// and nothing more: each `async` method calls its blocking twin and returns its
-/// result. There is no thread, no queue and no wake-up, because there is nothing to
-/// wait for — SQLite steps a `sqlite3_stmt` and returns.
+/// The two traits are method-for-method identical, so the bridge is a delegation and
+/// nothing more: each `async` method calls its blocking twin and returns its result.
+/// There is no thread, no queue and no wake-up, because there is nothing to wait for —
+/// SQLite steps a `sqlite3_stmt` and returns.
 ///
-/// ## What the bridge does and does not do
+/// What the bridge does not do is as important. The call runs on the task's own
+/// thread, so it occupies the event loop for as long as the driver takes: that is the
+/// right trade for a backend answering in microseconds out of the page cache, and the
+/// wrong one for a backend answering in milliseconds over a socket — a networked
+/// backend implements [`@moondb.AsyncDriver`] itself, where the wait is real and other
+/// tasks keep running through it. Nor does the bridge serialise: a driver that is not
+/// safe to use from two tasks at once is still not safe here, so give each task its own
+/// connection, or park them behind [`@moondb/apool.AsyncPool`], which hands one
+/// connection to one caller at a time.
 ///
-/// * The call runs **on the task's own thread**, so it occupies the event loop for
-///   as long as the driver takes. That is the right trade for a backend that answers
-///   in microseconds out of the page cache, and the wrong one for a backend that
-///   answers in milliseconds over a socket: a networked backend should implement
-///   [`@moondb.AsyncDriver`] itself, where the wait is real and other tasks keep running
-///   through it.
-/// * The bridge does not serialise. A driver that is not safe to use from two tasks
-///   at once is still not safe here; give each task its own connection, or park them
-///   behind [`@moondb/apool.AsyncPool`], which hands one connection to one
-///   caller at a time.
-/// * Everything beyond the base contract crosses intact: [`prepare`](#prepare) hands
-///   back the driver's own server-side handle rather than a buffered re-run, and
-///   [`query_stream`](#query_stream) keeps the driver's live cursor rather than
-///   materialising the result. `dialect` and `capabilities` come from the wrapped
-///   driver, so a query layer sees the real backend underneath.
+/// What it does keep is everything beyond the base contract: [`prepare`]
+/// hands back the driver's own server-side handle rather than a buffered re-run,
+/// [`query_stream`] keeps the driver's live cursor rather than
+/// materialising the result, and [`dialect`] and [`capabilities`]
+/// come from the wrapped driver, so a query layer sees the real backend underneath.
 ///
 /// ```moonbit check
 /// test "a blocking driver behind the async seam" {
