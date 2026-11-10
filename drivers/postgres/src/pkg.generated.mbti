@@ -130,6 +130,7 @@ pub struct PgConn {
   mut pid : Int32
   mut secret : Int32
   statements : Map[String, String]
+  described : Map[String, (Array[String], Array[Int32])]
   mut next_stmt : Int32
 }
 pub fn PgConn::backend_pid(Self) -> Int32

@@ -30,6 +30,12 @@ pub struct PgConn {
   mut secret : Int32
   // SQL → named prepared statement, so a repeated query re-parses only once.
   statements : Map[String, String]
+  // SQL → the (column names, type OIDs) its result carries, recorded from the one
+  // Describe a binary result needs; the format codes follow from the OIDs. Without it
+  // every binary query pays a second round trip to re-learn what the cached statement
+  // already fixes, and the entry is exactly as stale as that statement — that is, not
+  // at all, because a prepared statement's result types are fixed when it is parsed.
+  described : Map[String, (Array[String], Array[Int32])]
   mut next_stmt : Int32
 }
 
@@ -105,6 +111,7 @@ pub async fn PgConn::connect(
     pid: 0,
     secret: 0,
     statements: Map([]),
+    described: Map([]),
     next_stmt: 0,
   }
   // Close the socket on any handshake failure (a bad-password ErrorResponse is the
@@ -516,11 +523,13 @@ pub async fn PgConn::execute(
 /// the text RowDescription the server sends with them. The response is left on the
 /// socket for [`read_results`] or a [`PgRowStream`] to consume.
 ///
-/// A binary result is two batches: `Parse` (when the text is new) plus `Describe` of
-/// the statement, whose RowDescription names the column types that decide the
-/// formats; then `Bind` with those format codes, `Execute` and `Sync`. The Describe is
-/// what makes the second batch possible, and it is why a binary query is one round
-/// trip more expensive than a text one.
+/// A binary result needs each column's type before it can name a format for it, and
+/// a prepared statement's types are fixed at `Parse` time. So the first binary use of
+/// a SQL text is two batches — `Parse` (when the text is new) plus `Describe`, then
+/// `Bind` with the chosen format codes, `Execute` and `Sync` — and every later use of
+/// the same text is one: the description recorded from the first Describe names the
+/// same columns, because the statement the server holds has not changed. A text
+/// result never describes: its RowDescription arrives with the rows.
 async fn PgConn::send_statement(
   self : PgConn,
   sql : String,
@@ -545,15 +554,39 @@ async fn PgConn::send_statement(
   // named statement. The unnamed portal carries this call's parameters.
   let mut batch = if fresh { build_parse_named(name, translated) } else { b"" }
   if binary {
-    batch = concat_bytes(batch, build_describe_statement(name))
-    batch = concat_bytes(batch, build_sync())
-    self.write_all(batch)
-    let described = self.read_describe().chosen()
-    let mut bind = build_bind_named("", name, params, formats=described.formats)
-    bind = concat_bytes(bind, build_execute())
-    bind = concat_bytes(bind, build_sync())
-    self.write_all(bind)
-    return Some(described)
+    match self.described.get(sql) {
+      Some(cached) => {
+        // The types were learned the first time this SQL ran in binary. Bind them
+        // straight away: one round trip, the same as a text result.
+        let (names, oids) = cached
+        let described = ResultPlan::{ names, oids, formats: [], }.chosen()
+        batch = concat_bytes(
+          batch,
+          build_bind_named("", name, params, formats=described.formats),
+        )
+        batch = concat_bytes(batch, build_execute())
+        batch = concat_bytes(batch, build_sync())
+        self.write_all(batch)
+        return Some(described)
+      }
+      None => {
+        batch = concat_bytes(batch, build_describe_statement(name))
+        batch = concat_bytes(batch, build_sync())
+        self.write_all(batch)
+        let described = self.read_describe().chosen()
+        self.described.set(sql, (described.names, described.oids))
+        let mut bind = build_bind_named(
+          "",
+          name,
+          params,
+          formats=described.formats,
+        )
+        bind = concat_bytes(bind, build_execute())
+        bind = concat_bytes(bind, build_sync())
+        self.write_all(bind)
+        return Some(described)
+      }
+    }
   }
   batch = concat_bytes(batch, build_bind_named("", name, params))
   batch = concat_bytes(batch, build_describe_portal())

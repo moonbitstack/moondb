@@ -105,11 +105,11 @@ async test "offline: a binary query describes the statement, then binds per-type
 }
 
 ///|
-async test "offline: a cached binary statement skips the Parse but re-describes" {
+async test "offline: a repeated binary query binds the recorded types instead of describing" {
   let (conn, peer) = scripted()
   @async.with_task_group(group => {
     group.spawn_bg(() => {
-      // First call: Parse ('P'), Describe ('D'), Sync.
+      // First call: Parse ('P'), Describe ('D'), Sync, then Bind, Execute, Sync.
       peer.request() |> ignore
       peer.request() |> ignore
       peer.request() |> ignore
@@ -123,16 +123,14 @@ async test "offline: a cached binary statement skips the Parse but re-describes"
       peer.send(srv_binary_row([Some(be_cell(1L, 4))]))
       peer.send(srv_command("SELECT 1"))
       peer.send(srv_ready())
-      // Second call with the same SQL: the Parse is cached, so the batch opens with
-      // the Describe of the statement the cache already knows.
+      // Second call with the same text: the statement is cached, and so is the
+      // description, so the batch opens with Bind rather than Describe.
       let (second_tag, _) = peer.request()
-      assert_eq(second_tag, 68)
-      peer.request() |> ignore // Sync
-      peer.send(srv_row_description([("n", OID_INT4)]))
-      peer.send(srv_ready())
-      peer.request() |> ignore // Bind
-      peer.request() |> ignore // Execute
-      peer.request() |> ignore // Sync
+      assert_eq(second_tag, 66)
+      let (execute_tag, _) = peer.request()
+      assert_eq(execute_tag, 69)
+      let (sync_tag, _) = peer.request()
+      assert_eq(sync_tag, 83)
       peer.send(srv_bind_complete())
       peer.send(srv_binary_row([Some(be_cell(2L, 4))]))
       peer.send(srv_command("SELECT 1"))
@@ -142,6 +140,52 @@ async test "offline: a cached binary statement skips the Parse but re-describes"
     assert_eq(first[0].values[0] == @moondb.Int(1), true)
     let second = conn.query("SELECT n FROM cached", [], binary=true)
     assert_eq(second[0].values[0] == @moondb.Int(2), true)
+    // The column name came from the recorded description, not from the wire: a
+    // binary result carries no RowDescription at all.
+    assert_eq(second[0].columns[0], "n")
+  })
+}
+
+///|
+async test "offline: the recorded types belong to one statement text" {
+  let (conn, peer) = scripted()
+  @async.with_task_group(group => {
+    group.spawn_bg(() => {
+      // Two texts, each first used in binary: each describes once.
+      peer.request() |> ignore // Parse s1
+      peer.request() |> ignore // Describe s1
+      peer.request() |> ignore // Sync
+      peer.send(srv_parse_complete())
+      peer.send(srv_row_description([("n", OID_INT4)]))
+      peer.send(srv_ready())
+      peer.request() |> ignore // Bind
+      peer.request() |> ignore // Execute
+      peer.request() |> ignore // Sync
+      peer.send(srv_bind_complete())
+      peer.send(srv_binary_row([Some(be_cell(1L, 4))]))
+      peer.send(srv_command("SELECT 1"))
+      peer.send(srv_ready())
+      peer.request() |> ignore // Parse s2
+      peer.request() |> ignore // Describe s2
+      peer.request() |> ignore // Sync
+      peer.send(srv_parse_complete())
+      peer.send(srv_row_description([("t", OID_VARCHAR)]))
+      peer.send(srv_ready())
+      // The second text's types are text, not the first text's integer.
+      let (bind_tag, bind_body) = peer.request()
+      assert_eq(bind_tag, 66)
+      assert_eq(bind_body, expected_bind("s2", [1]))
+      peer.request() |> ignore // Execute
+      peer.request() |> ignore // Sync
+      peer.send(srv_bind_complete())
+      peer.send(srv_binary_row([Some(@utf8.encode("nv"))]))
+      peer.send(srv_command("SELECT 1"))
+      peer.send(srv_ready())
+    })
+    let first = conn.query("SELECT n FROM a", [], binary=true)
+    assert_eq(first[0].values[0] == @moondb.Int(1), true)
+    let second = conn.query("SELECT t FROM b", [], binary=true)
+    assert_eq(second[0].values[0] == @moondb.Text("nv"), true)
   })
 }
 

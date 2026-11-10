@@ -36,6 +36,7 @@ fn scripted() -> (PgConn, Peer) {
     pid: 4242,
     secret: 99,
     statements: Map([]),
+    described: Map([]),
     next_stmt: 0,
   }
   (conn, { out: from_server, inp: to_server, })
