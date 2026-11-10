@@ -197,6 +197,27 @@ The pure codec additionally runs on every backend, and `parse_server_version`
 has a unit test covering both MariaDB's `5.5.5-` sentinel and a plain MySQL
 version string.
 
+## The other MySQL-compatible server: TiDB
+
+Same protocol, same contract — so the driver's CI runs the shared
+[conformance matrix](https://moonbitstack.github.io/moondb/guide.html#conformance)
+against a real **TiDB v8.5** (`tidb-server --store=mocktikv`, no PD or TiKV needed),
+and all twelve cases pass there as they do on MySQL 8 and MariaDB.
+
+Its own SQL differs in three places the driver's MySQL suites notice, and they are
+differences in the server, not in the protocol:
+
+- **Stored procedures that return result sets** — `CREATE PROCEDURE` raises
+  `Unsupported type *resolve.NodeW` (error 8108), so `query_multi` has nothing to
+  return. TiDB executes a `CALL` for side effects only.
+- **Charset names** — the session reports `utf8mb3` where MySQL reports `utf8` for the
+  same collation id. The driver sends the id, not the name, so nothing breaks; a
+  query that reads `@@character_set_connection` sees the other spelling.
+- **`FLOAT` rendering** — TiDB's text protocol keeps more digits than MySQL's six
+  (`1.2345679` rather than `1.23457`), so the text-versus-binary parity differs from
+  MySQL's in the same place MySQL's already does. `DOUBLE`, or a prepared statement,
+  when the 32-bit value has to be exact.
+
 ## Consistency
 
 Every column type reads the same through the text and the binary protocol, with one

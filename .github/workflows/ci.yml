@@ -562,3 +562,127 @@ jobs:
         run: |
           moon info --target all && git diff --exit-code
 
+
+  # Servers that speak PostgreSQL's wire protocol but are not PostgreSQL. The same
+  # driver carries the base contract on all of them, so the shared conformance matrix
+  # is what runs here; the driver's own PostgreSQL tests cover COPY, LISTEN/NOTIFY and
+  # server cursors, which these servers do not implement (see drivers/postgres/README.md).
+  cockroachdb:
+    name: moonpostgres (native, live CockroachDB)
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: drivers/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: start CockroachDB
+        run: |
+          docker run -d --name crdb \
+            -p 26257:26257 \
+            cockroachdb/cockroach:v24.3.0 start-single-node --insecure
+
+      - name: install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: wait for CockroachDB
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec crdb cockroach sql --insecure -e "SELECT 1;" >/dev/null 2>&1; then
+              echo "cockroachdb is up"; break
+            fi
+            echo "waiting for cockroachdb... ($i)"; sleep 2
+            if [ "$i" = 60 ]; then echo "cockroachdb never came up"; exit 1; fi
+          done
+          docker exec crdb cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS test;"
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (the shared matrix against live CockroachDB)
+        env:
+          MOON_PG_TEST: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "26257"
+          PGUSER: root
+          PGPASSWORD: ""
+          PGDATABASE: test
+        run: moon test --target native src/conformance_integration_wbtest.mbt
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code
+
+  # The other MySQL-compatible server, from a different lineage: TiDB speaks the
+  # protocol and SQL of MySQL but implements neither of MySQL's two big features the
+  # driver also offers (no COPY, no server cursor), and its own dialect on top. Same
+  # protocol, same contract — so the same conformance matrix.
+  tidb:
+    name: moonmysql (native, live TiDB)
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: drivers/mysql
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: start TiDB
+        run: |
+          docker run -d --name tidb \
+            -p 4000:4000 -p 10080:10080 \
+            pingcap/tidb:v8.5.0 --store=mocktikv --path='' --host=0.0.0.0
+
+      - name: install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: wait for TiDB
+        run: |
+          # 10080 is TiDB's status port; it answers only once the server serves SQL.
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:10080/status >/dev/null 2>&1; then
+              echo "tidb is up"; break
+            fi
+            echo "waiting for tidb... ($i)"; sleep 2
+            if [ "$i" = 90 ]; then docker logs tidb; exit 1; fi
+          done
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (the shared matrix against live TiDB)
+        env:
+          MYSQL_TEST: "1"
+          MYSQL_HOST: "127.0.0.1"
+          MYSQL_PORT: "4000"
+          MYSQL_USER: "root"
+          MYSQL_PASSWORD: ""
+          MYSQL_DB: "test"
+        run: moon test --target native src/client/conformance_integration_test.mbt
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code

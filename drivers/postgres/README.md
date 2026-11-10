@@ -141,6 +141,30 @@ This is the language-idiomatic equivalent, not a shortcut: asyncpg is async for 
 
 The `DataRow` decoder is mutation-checked: breaking it makes the decode test fail with a type error. So is the format choice — declaring `float4` binary turns the parity matrix red on the first row.
 
+## Servers that speak this protocol
+
+PostgreSQL is not the only server that answers it. The driver's CI runs the shared
+[conformance matrix](https://moonbitstack.github.io/moondb/guide.html#conformance) —
+connect, bind and read back, prepare, transact, nest through a savepoint, every column
+type, and the classification of two failures — against a real **CockroachDB v24.3**
+(`cockroach start-single-node --insecure`) as well as against PostgreSQL 16, and the
+same twelve cases pass on both. Nothing in the driver is PostgreSQL-specific below the
+SQL layer: the startup handshake, the extended-query protocol, the binary formats and
+the error mapping are what the wire protocol defines.
+
+What differs is the SQL on top, and the driver's own PostgreSQL suites name it, which
+is why those run against PostgreSQL only:
+
+- **`LISTEN` / `NOTIFY`** — not implemented; the server answers `syntax error at or near
+  "listen"`. A query layer that depends on notifications has to poll instead.
+- **`DROP TYPE … CASCADE`** — not implemented, which is enough to fail a type-matrix
+  fixture that uses it.
+- **`capabilities()`** describes the PostgreSQL driver, not the server in front of it: it
+  reports `streaming_copy` and `server_cursors` true, and queries `DECLARE`/`FETCH` and
+  `COPY (…) TO STDOUT` do work on CockroachDB, but a `COPY … FROM` or a notify stream
+  would not. Read the report as "what this driver implements", exactly as its doc says,
+  and lower your plan when you know the server is not PostgreSQL.
+
 ## Not covered
 
 - **Pipeline mode** (PostgreSQL 14+). The wire seam already speaks one message batch at a time; batching independent statements would be a latency optimisation, not a capability.
