@@ -208,8 +208,31 @@ caps.unsigned_integers <span class="kw">//</span> an unsigned 64-bit column keep
           <div class="article"><div class="num">iv</div><div class="body"><h3>capabilities → Capabilities</h3><p class="muted">Default is the preset for the reported dialect. Override only if the driver implements a different subset than the preset claims.</p></div></div>
         </section>
 
+        <section class="section" id="bridge">
+          <p class="folio">§10</p>
+          <h2>A blocking driver, seen as an async one</h2>
+          <p class="muted">An application usually has one backend and one shape of code. A checkpoint store, a retrieval index, a server running a single event loop for every dependency — all written against <code class="inline">AsyncDriver</code>, with a database underneath that may answer straight out of the page cache. <code class="inline">@blocking.Blocking</code> is that seam: every async method calls its blocking twin, and nothing else changes.</p>
+          <pre class="signature"><span class="kw">let</span> db = @blocking.Blocking::new(@moonsqlite.SqliteDriver::open("app.db"))
+<span class="kw">let</span> conn : &amp;@moondb.AsyncDriver = db
+conn.execute("INSERT INTO hero VALUES (?, ?)", [Int(1), Text("Nova")])
+<span class="kw">let</span> rows = conn.query("SELECT id FROM hero", [])</pre>
+          <p class="muted">Three details make it more than a cast. <code class="inline">prepare</code> hands back the driver's own handle — a <code class="inline">sqlite3_stmt</code> compiled once — instead of the async default, which re-runs the SQL text on every call. <code class="inline">query_stream</code> keeps the driver's live cursor, so the memory bound survives. And <code class="inline">dialect</code>/<code class="inline">capabilities</code> come from the wrapped driver, so a query layer above sees the real backend rather than the seam's SQLite default.</p>
+          <p class="muted">The call runs on the task's own thread, which is right for a backend answering in microseconds and wrong for one answering over a socket: a networked backend implements <code class="inline">AsyncDriver</code> itself. The bridge does not serialise either — one connection per task, or an <code class="inline">@apool.AsyncPool</code> handing one connection to one caller at a time.</p>
+        </section>
+
+        <section class="section" id="conformance">
+          <p class="folio">§11</p>
+          <h2>Holding a driver to the contract</h2>
+          <p class="muted">A backend is easy to write and hard to trust. <code class="inline">@conformance</code> is the contract as a case matrix: connect, bind and read back, prepare once and re-run, bracket a transaction, nest one through a savepoint, carry every <code class="inline">Value</code> case the dialect has a column for, and classify a duplicate key and a malformed statement the way the error model says. Every backend here answers the same cases.</p>
+          <pre class="signature"><span class="kw">let</span> report = @conformance.check_blocking(@moonsqlite.SqliteDriver::open(":memory:"))
+report.summary()      <span class="kw">//</span> "12 passed, 0 skipped, 0 failed"
+report.failures()     <span class="kw">//</span> one line per case the backend did not honour
+report.is_clean()     <span class="kw">//</span> no failures (a skip is not a pass)</pre>
+          <p class="muted">A case that raises becomes a line in the report instead of ending the run, so a broken backend produces a list of what is wrong rather than a stack trace at the first problem. A feature the driver reports as absent — savepoints, say — is recorded as skipped with its reason, never counted as a pass. The same matrix runs in CI against PostgreSQL, MySQL, MariaDB, CockroachDB and TiDB, and the two wire drivers carry it in their own suites.</p>
+        </section>
+
         <section class="section" id="orm">
-          <p class="folio">§9</p>
+          <p class="folio">§12</p>
           <h2>Built on moondb</h2>
           <p class="muted">ORMs such as <a href="https://moonbitstack.github.io/moonorm/">moonorm</a> write their SQL generation against the <code class="inline">Driver</code> trait — not against any one backend. That is the whole point of the contract: one query layer, every ratified driver.</p>
           <div class="cta">

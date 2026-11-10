@@ -7,7 +7,7 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-294%20passing-2ea44f)](#tests)
+[![tests](https://img.shields.io/badge/tests-296%20passing-2ea44f)](#tests)
 [![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -63,6 +63,8 @@ moon add moonbitstack/moondb
 | [`AsyncDriver`](#asyncdriver) | the same contract for a backend reached over a socket, every method awaited | asyncpg / `asyncio` DB-API |
 | [`AsyncCursor`](#asyncdriver) | forward-only cursor whose `next` is awaited, for a wire driver's live rows | — |
 | [`MockDriver`](#mockdriver) | dependency-free in-memory reference driver, for tests | — |
+| [`@blocking.Blocking`](blocking/) | a synchronous driver presented as an `AsyncDriver`, in `moonbitstack/moondb/blocking` | — |
+| [`@conformance.Report`](conformance/) | the contract as a case matrix any driver answers, in `moonbitstack/moondb/conformance` | — |
 | [`Dialect`](#dialects-and-capabilities) | `Sqlite` / `Postgres` / `Mysql`, and the placeholder each spells | — |
 | [`Capabilities`](#dialects-and-capabilities) | what a backend can do beyond the base contract | — |
 | [`QueryExecutor`](#the-narrow-view) | the part of a driver that runs SQL, without the part that owns the connection | Go `Queryer` context, SQLAlchemy `Connection.exec_driver_sql` |
@@ -221,6 +223,23 @@ test "ask the driver, not the caller" {
 
 `Capabilities` reports prepared statements, named parameters, server-side cursors, streaming `COPY`, savepoints, multiple result sets, unsigned 64-bit integers and `RETURNING` — what the driver in this repository implements, not what the server software could do in principle.
 
+## A blocking driver, seen as an async one
+
+The two driver traits are peers, but an application usually has one backend and one shape of code. A checkpoint store, a retrieval index, a server that runs a single event loop for every dependency — they are all written against `AsyncDriver`, and the database under them may well be a file that answers from the page cache. `@blocking.Blocking` is that seam: every async method calls its blocking twin, and nothing else changes.
+
+```moonbit
+async test "a blocking driver behind the async seam" {
+  let db = @blocking.Blocking::new(@moondb.MockDriver::new())
+  assert_eq(db.dialect(), @moondb.Dialect::Sqlite)
+  assert_true(db.capabilities().savepoints)
+  assert_true(db.ping())
+}
+```
+
+Three details are what make it more than a cast. `prepare` hands back the driver's own handle — a `sqlite3_stmt` compiled once — instead of the async default, which would re-run the SQL text on every call. `query_stream` keeps the driver's live cursor, so the memory bound survives. And `dialect`/`capabilities` come from the wrapped driver, so a query layer above sees PostgreSQL as PostgreSQL and not as the seam's SQLite default.
+
+The call runs on the task's own thread, so it occupies the event loop for as long as the driver takes: right for a backend that answers in microseconds out of the page cache, wrong for one that answers in milliseconds over a socket — a networked backend implements `AsyncDriver` itself, where the wait is real. The bridge does not serialise either; give each task its own connection, or park them in an `@apool.AsyncPool`, which hands one connection to one caller at a time.
+
 ## The narrow view
 
 A repository method, a query builder, a migration step all want to run SQL; none of them should be able to `close` the connection out from under the caller that lent it to them. `Executor::new(db)` is that narrower handle, and a function that takes `&QueryExecutor` accepts it:
@@ -252,6 +271,33 @@ pub impl @moondb.Driver for MyConn with fn execute(self, sql, params) {
 
 `execute`/`query`/`begin`/`commit`/`rollback` raise `DbError` on failure; `close` is best-effort and idempotent.
 
+## Holding a driver to the contract
+
+A new backend is easy to write and hard to trust. `@conformance` is the contract as a case matrix, written once against the asynchronous seam, so every backend answers the same questions: does `ping` report a live connection, does a bound value read back exactly as it was written — a 64-bit integer, text, a double, bytes with a zero in them, a boolean, a `NULL` — does a prepared handle run twice with new values, does a cursor yield what `query` returns, does a rollback discard the work and a commit keep it, does a savepoint undo exactly one level, and are a duplicate key and a malformed statement classified the way the error model says.
+
+```moonbit
+test "a report says what a backend honoured" {
+  let report : @conformance.Report = {
+    cases: [
+      { name: "connection: ping", outcome: @conformance.Outcome::Passed },
+      { name: "error: a duplicate key", outcome: @conformance.Outcome::Failed("accepted") },
+    ],
+  }
+  assert_eq(report.summary(), "1 passed, 0 skipped, 1 failed")
+  assert_eq(report.failures(), ["error: a duplicate key: accepted"])
+}
+```
+
+Each case becomes one line in the report, and a failure says what came back instead, so a broken backend produces a list of what is wrong rather than a stack trace at the first problem. A case whose feature the driver reports as absent — savepoints, say — is recorded as skipped with the reason, never counted as a pass. A blocking driver goes through `check_blocking`, which bridges it and exercises the bridge as it goes:
+
+<!-- nocheck -->
+```moonbit
+let report = @conformance.check_blocking(@moonsqlite.SqliteDriver::open(":memory:"))
+assert_eq(report.failures(), [])
+```
+
+`Report` counts what passed, failed and was left out, `failures()` returns one line per failure, and `summary()` is one line for a build log.
+
 ## Design notes
 
 - **Why raise, not `Result`.** Typed accessors and driver calls `raise DbError` rather than returning `Result[_, DbError]`, so a decode bug or a dropped connection surfaces at the call site instead of being silently swallowed. A caller opts into recovery with `try`/`catch`.
@@ -281,11 +327,11 @@ pub impl @moondb.Driver for MyConn with fn execute(self, sql, params) {
 | Binary result format | — | opt-in, per column | prepared statements |
 | Long parameters (streamed) | — | — | yes, past 1 MiB |
 
-A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement. Binary results and streamed parameters are driver-level choices rather than contract ones: they change how a value crosses the wire, not what the trait can express, so each driver exposes them on its own calls.
+Each driver's CI also runs the shared conformance matrix against servers of a different lineage that speak the same wire protocol — CockroachDB for PostgreSQL, TiDB for MySQL — and each driver's README lists the SQL differences those servers bring. A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement. Binary results and streamed parameters are driver-level choices rather than contract ones: they change how a value crosses the wire, not what the trait can express, so each driver exposes them on its own calls.
 
 ## Tests
 
-The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics and savepoint scope — both connection pools, the `:name` lexer (literals, identifiers, comments, dollar quotes, casts, JSONB operators, mixed conventions), the statement handles, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire: statement sequencing, the streaming guard, the post-error drain, the prepared handle, the server-side cursor and the COPY sub-protocol. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; breaking the savepoint rollback scope turns the nested-transaction tests red; breaking the dollar-quote lexing turns the named-parameter tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; and dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red. They run on all four backends:
+The conformance matrix runs against real PostgreSQL, MySQL, MariaDB, CockroachDB and TiDB in CI; SQLite has its own native suite. The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics and savepoint scope — both connection pools, the `:name` lexer (literals, identifiers, comments, dollar quotes, casts, JSONB operators, mixed conventions), the statement handles, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire: statement sequencing, the streaming guard, the post-error drain, the prepared handle, the server-side cursor and the COPY sub-protocol. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; breaking the savepoint rollback scope turns the nested-transaction tests red; breaking the dollar-quote lexing turns the named-parameter tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red; dropping the bridge's `prepare` delegation turns its statement test red; and not recording a binary result's column types turns the second-call test red. They run on all four backends:
 
 ```bash
 moon test --target all

@@ -22,7 +22,7 @@
 ///
 /// ## Using it
 ///
-/// ```moonbit no-check
+/// ```moonbit nocheck
 /// async test "the backend honours the contract" {
 ///   let conn = @moonpostgres.PgConn::connect(
 ///     "127.0.0.1", 5432, "postgres", "postgres", "test",
@@ -35,7 +35,7 @@
 /// A blocking driver goes through the bridge, and the suite then exercises the bridge
 /// as well:
 ///
-/// ```moonbit no-check
+/// ```moonbit nocheck
 /// async test "the embedded backend honours the contract" {
 ///   let db = @moonsqlite.SqliteDriver::open(":memory:")
 ///   let report = @conformance.check(@blocking.Blocking::new(db))

@@ -31,6 +31,13 @@ SITES = [
             ("src", "moonbitstack/moondb", "moondb", "moondb"),
             ("src/pool", "moonbitstack/moondb/pool", "pool", "pool"),
             ("src/apool", "moonbitstack/moondb/apool", "apool", "apool"),
+            ("src/blocking", "moonbitstack/moondb/blocking", "blocking", "blocking"),
+            (
+                "src/conformance",
+                "moonbitstack/moondb/conformance",
+                "conformance",
+                "conformance",
+            ),
             ("drivers/sqlite/src", "moonbitstack/moonsqlite", "moonsqlite", "moonsqlite"),
             ("drivers/postgres/src", "moonbitstack/moonpostgres", "moonpostgres", "moonpostgres"),
             ("drivers/mysql/src", "moonbitstack/moonmysql", "moonmysql", "moonmysql"),
@@ -61,6 +68,7 @@ SKIP_PREFIXES = ("//", "package", "import", "derive(", "pub impl", "pub extend",
 
 DECL_RE = re.compile(
     r"^\s*pub(?:\([^)]*\))?\s+"
+    r"(?:async\s+)?"
     r"(struct|enum|trait|suberror|type|fn|const|let)\s*"
     r"(?:\[[^\]]*\]\s*)?"
     r"([A-Za-z_]\w*(?:::[A-Za-z_]\w*)?)"

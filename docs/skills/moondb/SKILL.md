@@ -1,6 +1,6 @@
 ---
 name: moondb
-description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or MySQL through the moondb interface — running queries, binding values by name, reusing a prepared statement, nesting transactions, asking a backend what it supports, reading a result in the binary format, or sending a value larger than a packet. Covers the Driver/AsyncDriver contract, Stmt, Txn, Dialect and Capabilities.
+description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or MySQL through the moondb interface — running queries, binding values by name, reusing a prepared statement, nesting transactions, asking a backend what it supports, reading a result in the binary format, sending a value larger than a packet, handing a blocking driver to async code, or checking a new backend against the contract. Covers the Driver/AsyncDriver contract, Stmt, Txn, Dialect, Capabilities, the blocking bridge and the conformance matrix.
 ---
 
 # moondb
@@ -165,10 +165,49 @@ mysql.execute("INSERT INTO asset VALUES (?, ?)", [
 ])
 ```
 
-On PostgreSQL, asking for binary costs one extra round trip per call, because the
-column types have to be described before the bind can choose a format for each. A
-prepared handle — `conn.prepare_stmt(sql, binary = true)` — describes once at
-prepare time and pays nothing per run.
+On PostgreSQL, the first binary use of a SQL text costs one extra round trip, because
+the column types have to be described before the bind can choose a format for each.
+The types are remembered per statement, so later calls with the same text bind
+straight away; a prepared handle — `conn.prepare_stmt(sql, binary = true)` —
+describes once at prepare time and pays nothing per run.
+
+## When the code is async and the driver is not
+
+A checkpoint store or a retrieval index is written against `AsyncDriver`; an
+embedded backend implements `Driver`. Wrap it once and hand it over — do not write
+your own adapter, and do not force the backend to become async.
+
+<!-- nocheck -->
+```moonbit
+let db = @blocking.Blocking::new(@sqlite.SqliteDriver::open("state.db"))
+let store = @state.store(db)          // anything that takes an AsyncDriver
+```
+
+The bridge keeps the driver's own prepared handle and live cursor, and reports the
+real dialect and capabilities. The call runs on the task's thread, so it suits a
+backend answering from a local file, not one answering over a socket. It does not
+serialise: one connection per task, or an `@apool.AsyncPool`.
+
+## Check a new backend against the contract
+
+`@conformance` runs the contract as a case matrix — connect, bind and read back,
+prepare, transact, nest through a savepoint, every `Value` case the dialect has a
+column for, and the classification of two failures — and hands back a report
+instead of aborting on the first problem.
+
+<!-- nocheck -->
+```moonbit
+let report = @conformance.check_blocking(@sqlite.SqliteDriver::open(":memory:"))
+println(report.summary())        // "12 passed, 0 skipped, 0 failed"
+for line in report.failures() {  // one line per case the backend did not honour
+  println(line)
+}
+```
+
+`check` takes an `AsyncDriver`; `check_blocking` takes a `Driver` and runs it
+through the bridge. A feature the driver reports as absent is recorded as skipped
+with its reason — a skip is not a pass, so print `report.skips()` too when a run
+comes back cleaner than expected.
 
 ## Gotchas
 
