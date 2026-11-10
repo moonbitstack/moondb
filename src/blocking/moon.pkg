@@ -1,0 +1,11 @@
+// A synchronous driver presented as an asynchronous one. Kept in its own package
+// so the interface stays dependency-free: the bridge is a plain trait
+// implementation and pulls in no runtime of its own.
+import {
+  "moonbitstack/moondb",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitstack/moondb",
+} for "test"

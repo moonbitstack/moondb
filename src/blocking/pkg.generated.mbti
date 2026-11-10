@@ -1,0 +1,55 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moondb/blocking"
+
+import {
+  "moonbitstack/moondb",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct Blocking[T] {
+  driver : T
+}
+pub async fn[T : @moondb.Driver] Blocking::begin(Self[T]) -> Unit raise @moondb.DbError
+pub fn[T : @moondb.Driver] Blocking::capabilities(Self[T]) -> @moondb.Capabilities
+pub async fn[T : @moondb.Driver] Blocking::close(Self[T]) -> Unit
+pub async fn[T : @moondb.Driver] Blocking::commit(Self[T]) -> Unit raise @moondb.DbError
+pub fn[T : @moondb.Driver] Blocking::dialect(Self[T]) -> @moondb.Dialect
+pub async fn[T : @moondb.Driver] Blocking::execute(Self[T], String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
+pub fn[T] Blocking::inner(Self[T]) -> T
+pub fn[T] Blocking::new(T) -> Self[T]
+pub async fn[T : @moondb.Driver] Blocking::ping(Self[T]) -> Bool
+pub async fn[T : @moondb.Driver] Blocking::prepare(Self[T], String) -> &@moondb.AsyncStmt raise @moondb.DbError
+pub async fn[T : @moondb.Driver] Blocking::query(Self[T], String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn[T : @moondb.Driver] Blocking::query_stream(Self[T], String, Array[@moondb.Value]) -> &@moondb.AsyncCursor raise @moondb.DbError
+pub async fn[T : @moondb.Driver] Blocking::rollback(Self[T]) -> Unit raise @moondb.DbError
+pub impl[T : @moondb.Driver] @moondb.AsyncDriver for Blocking[T]
+
+pub struct BlockingCursor {
+  cursor : &@moondb.Cursor
+}
+pub async fn BlockingCursor::close(Self) -> Unit
+pub fn BlockingCursor::new(&@moondb.Cursor) -> Self
+pub async fn BlockingCursor::next(Self) -> @moondb.Row? raise @moondb.DbError
+pub impl @moondb.AsyncCursor for BlockingCursor
+
+pub struct BlockingStmt {
+  stmt : &@moondb.Stmt
+}
+pub async fn BlockingStmt::bind(Self, Array[@moondb.Value]) -> Unit raise @moondb.DbError
+pub async fn BlockingStmt::bind_named(Self, Map[String, @moondb.Value]) -> Unit raise @moondb.DbError
+pub async fn BlockingStmt::close(Self) -> Unit
+pub async fn BlockingStmt::execute(Self) -> @moondb.ExecResult raise @moondb.DbError
+pub fn BlockingStmt::new(&@moondb.Stmt) -> Self
+pub fn BlockingStmt::params(Self) -> Array[String]
+pub async fn BlockingStmt::query(Self) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn BlockingStmt::query_stream(Self) -> &@moondb.AsyncCursor raise @moondb.DbError
+pub fn BlockingStmt::sql(Self) -> String
+pub impl @moondb.AsyncStmt for BlockingStmt
+
+// Type aliases
+
+// Traits
