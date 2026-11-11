@@ -1,0 +1,24 @@
+// moonduckdb: the embedded analytical engine behind the moondb contract. `DuckdbDriver`
+// implements `@moondb.Driver` over DuckDB's C API, so a query layer written for SQLite or
+// PostgreSQL runs on a columnar store unchanged.
+//
+// The engine is not compiled into this package. A DuckDB amalgamation is a twenty-
+// megabyte C++ translation unit; the stub below loads the released shared library at run
+// time instead, which keeps every build of this module to one small C file and leaves the
+// engine a thing the machine already has. `MOONDUCKDB_LIBRARY` names it when the default
+// search does not find it.
+supported_targets = "native"
+
+import {
+  "moonbitstack/moondb",
+  "moonbitlang/core/encoding/utf8",
+}
+
+options(
+  "native-stub": [ "duckdb/stub.c" ],
+)
+
+import {
+  "moonbitlang/async",
+  "moonbitstack/moondb/conformance",
+} for "test"

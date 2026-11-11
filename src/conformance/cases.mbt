@@ -241,6 +241,16 @@ fn expect_integrity_violation(
         e.kind() == @moondb.ErrorKind::Database,
         "a duplicate key raised " + e.to_string(),
       )
+    // DuckDB classifies the violation itself but has no SQLSTATE to quote: its answer
+    // is `Constraint Error: Duplicate key …`, which is a class of its own.
+    Duckdb =>
+      expect(
+        e.kind() == @moondb.ErrorKind::Integrity,
+        "a duplicate key was classified " +
+        e.kind().to_string() +
+        ": " +
+        e.to_string(),
+      )
     _ => {
       expect(
         e.kind() == @moondb.ErrorKind::Integrity,
@@ -276,7 +286,7 @@ fn expect_programming_error(
       )
     // ClickHouse reports a parser error as a `Server` error with its own code, which
     // the driver maps onto `Programming`; there is no SQLSTATE to quote.
-    Clickhouse =>
+    Clickhouse | Duckdb =>
       expect(
         e.kind() == @moondb.ErrorKind::Programming,
         "a malformed statement was classified " +

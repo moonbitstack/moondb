@@ -1,0 +1,52 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moonduckdb"
+
+import {
+  "moonbitstack/moondb",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct DuckdbDriver {
+  handle : Int64
+  mut closed : Bool
+}
+pub fn DuckdbDriver::begin(Self) -> Unit raise @moondb.DbError
+pub fn DuckdbDriver::capabilities(Self) -> @moondb.Capabilities
+pub fn DuckdbDriver::close(Self) -> Unit
+pub fn DuckdbDriver::commit(Self) -> Unit raise @moondb.DbError
+pub fn DuckdbDriver::dialect(Self) -> @moondb.Dialect
+pub fn DuckdbDriver::exec_script(Self, String) -> Unit raise @moondb.DbError
+pub fn DuckdbDriver::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
+pub fn DuckdbDriver::is_closed(Self) -> Bool
+pub fn DuckdbDriver::open(String) -> Self raise @moondb.DbError
+pub fn DuckdbDriver::ping(Self) -> Bool
+pub fn DuckdbDriver::prepare(Self, String) -> &@moondb.Stmt raise @moondb.DbError
+pub fn DuckdbDriver::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
+pub fn DuckdbDriver::query_stream(Self, String, Array[@moondb.Value]) -> &@moondb.Cursor raise @moondb.DbError
+pub fn DuckdbDriver::rollback(Self) -> Unit raise @moondb.DbError
+pub impl @moondb.Driver for DuckdbDriver
+
+pub struct DuckdbStmt {
+  handle : Int64
+  sql : String
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}
+pub fn DuckdbStmt::bind(Self, Array[@moondb.Value]) -> Unit raise @moondb.DbError
+pub fn DuckdbStmt::bind_named(Self, Map[String, @moondb.Value]) -> Unit raise @moondb.DbError
+pub fn DuckdbStmt::close(Self) -> Unit
+pub fn DuckdbStmt::execute(Self) -> @moondb.ExecResult raise @moondb.DbError
+pub fn DuckdbStmt::new(Int64, String) -> Self raise @moondb.DbError
+pub fn DuckdbStmt::params(Self) -> Array[String]
+pub fn DuckdbStmt::query(Self) -> Array[@moondb.Row] raise @moondb.DbError
+pub fn DuckdbStmt::query_stream(Self) -> &@moondb.Cursor raise @moondb.DbError
+pub fn DuckdbStmt::sql(Self) -> String
+pub impl @moondb.Stmt for DuckdbStmt
+
+// Type aliases
+
+// Traits

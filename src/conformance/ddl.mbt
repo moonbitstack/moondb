@@ -39,6 +39,12 @@ fn create_table(dialect : @moondb.Dialect, table : String) -> String {
       "CREATE TABLE " +
       table +
       " (id Int32, n Int64, label String, score Float64, payload String, flag Bool, missing Nullable(String)) ENGINE = Memory"
+    // DuckDB names its types the PostgreSQL way and its bytes `BLOB`; it needs no
+    // storage engine clause, and a primary key is enforced by the index it builds.
+    Duckdb =>
+      "CREATE TABLE " +
+      table +
+      " (id INTEGER PRIMARY KEY, n BIGINT NOT NULL, label VARCHAR, score DOUBLE, payload BLOB, flag BOOLEAN, missing VARCHAR)"
   }
 }
 

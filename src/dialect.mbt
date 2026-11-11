@@ -28,6 +28,11 @@ pub(all) enum Dialect {
   /// transactions, no server-side cursors and its own type names, and a query layer
   /// that emitted SQL for either of the others would be wrong on it.
   Clickhouse
+  /// DuckDB is an embedded analytical engine with PostgreSQL's SQL surface and SQLite's
+  /// shape: `?` placeholders, `BLOB` for bytes, no savepoints, and a catalog that names
+  /// its types its own way. A query layer that treated it as either neighbour would
+  /// emit SQL the engine rejects.
+  Duckdb
 }
 
 ///|
@@ -40,7 +45,7 @@ pub(all) enum Dialect {
 pub fn Dialect::placeholder(self : Dialect, n : Int32) -> String {
   match self {
     Postgres => "$" + n.to_string()
-    Sqlite | Mysql | Clickhouse => "?"
+    Sqlite | Mysql | Clickhouse | Duckdb => "?"
   }
 }
 
@@ -53,6 +58,7 @@ pub fn Dialect::name(self : Dialect) -> String {
     Postgres => "postgres"
     Mysql => "mysql"
     Clickhouse => "clickhouse"
+    Duckdb => "duckdb"
   }
 }
 
@@ -67,6 +73,7 @@ pub fn Dialect::parse(name : String) -> Dialect? {
     "postgres" | "postgresql" | "pg" => Some(Postgres)
     "mysql" | "mariadb" => Some(Mysql)
     "clickhouse" | "ch" => Some(Clickhouse)
+    "duckdb" => Some(Duckdb)
     _ => None
   }
 }
