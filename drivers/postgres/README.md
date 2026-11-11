@@ -146,24 +146,47 @@ The `DataRow` decoder is mutation-checked: breaking it makes the decode test fai
 PostgreSQL is not the only server that answers it. The driver's CI runs the shared
 [conformance matrix](https://moonbitstack.github.io/moondb/guide.html#conformance) —
 connect, bind and read back, prepare, transact, nest through a savepoint, every column
-type, and the classification of two failures — against a real **CockroachDB v24.3**
-(`cockroach start-single-node --insecure`) as well as against PostgreSQL 16, and the
-same twelve cases pass on both. Nothing in the driver is PostgreSQL-specific below the
-SQL layer: the startup handshake, the extended-query protocol, the binary formats and
-the error mapping are what the wire protocol defines.
+type, and the classification of two failures — against a real **CockroachDB v24.3** and
+a real **openGauss 7.0**, as well as against PostgreSQL 16. All twelve cases pass on all
+three. Nothing below the SQL layer is PostgreSQL-specific: the startup handshake, the
+extended-query protocol, the binary formats and the error mapping are what the wire
+protocol defines.
 
-What differs is the SQL on top, and the driver's own PostgreSQL suites name it, which
-is why those run against PostgreSQL only:
+What differs is the SQL on top, and each server's own suites name it — which is why
+those suites run against PostgreSQL only.
+
+### CockroachDB
 
 - **`LISTEN` / `NOTIFY`** — not implemented; the server answers `syntax error at or near
   "listen"`. A query layer that depends on notifications has to poll instead.
 - **`DROP TYPE … CASCADE`** — not implemented, which is enough to fail a type-matrix
   fixture that uses it.
-- **`capabilities()`** describes the PostgreSQL driver, not the server in front of it: it
-  reports `streaming_copy` and `server_cursors` true, and queries `DECLARE`/`FETCH` and
-  `COPY (…) TO STDOUT` do work on CockroachDB, but a `COPY … FROM` or a notify stream
-  would not. Read the report as "what this driver implements", exactly as its doc says,
-  and lower your plan when you know the server is not PostgreSQL.
+- **Queries** `DECLARE`/`FETCH` and `COPY (…) TO STDOUT` do work; `COPY … FROM` and a
+  notify stream would not.
+
+### openGauss
+
+- **Authentication.** openGauss hashes passwords with its own algorithms. With
+  `password_encryption_type = 0` (MD5) this driver authenticates as it does against
+  PostgreSQL; the default `2` (SHA-256 only) and `3` (SM3 only) are answered with an
+  authentication request this driver does not implement, and the connection is refused.
+  Set it with `gs_guc reload -N all -I all -c "password_encryption_type=0"` and reset the
+  role's password, or run the server with the value already at `0`.
+- **`ON CONFLICT … DO UPDATE`** — not implemented (`syntax error at or near "CONFLICT"`);
+  an upsert needs `MERGE INTO` or a delete-then-insert.
+- **`DOMAIN`** — not implemented (`DOMAIN is not yet supported`), so a domain column cannot
+  be read at all, not even as text.
+- **`LISTEN` / `NOTIFY`** — not implemented (`LISTEN statement is not yet supported`).
+- **An empty string is stored as `NULL`.** openGauss does not distinguish `''` from
+  `NULL`, so `Text("")` does not round-trip; read such a column as `T?` and do not rely
+  on telling the two apart.
+- **`BackendKeyData`'s pid is not `pg_backend_pid()`.** A pool that identifies a reused
+  connection by that pid (this driver's own pool test does) has to identify it another
+  way against openGauss.
+- **`capabilities()`** describes this driver, not the server in front of it. It reports
+  `streaming_copy`, `server_cursors` and `multiple_result_sets` true because the
+  PostgreSQL implementation has them; `COPY` and cursors work on openGauss, but the three
+  statements above do not.
 
 ## Not covered
 

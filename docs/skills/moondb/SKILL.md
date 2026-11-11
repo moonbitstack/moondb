@@ -7,9 +7,9 @@ description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or M
 
 `moonbitstack/moondb` is the interface layer between MoonBit query code and a
 database driver. It defines `Value`, `Row`, `Driver`, `AsyncDriver`, `Stmt`,
-`Txn`, `Dialect` and `Capabilities`; the drivers
-(`moonsqlite`, `moonpostgres`, `moonmysql`) implement them. Code written against
-`Driver` runs on all three.
+`Txn`, `Dialect` and `Capabilities`; the drivers (`moonsqlite`,
+`moonpostgres`, `moonmysql`, `moonclickhouse`) implement them. Code written
+against `Driver` runs on all of them.
 
 ## Install and import
 
@@ -208,6 +208,31 @@ for line in report.failures() {  // one line per case the backend did not honour
 through the bridge. A feature the driver reports as absent is recorded as skipped
 with its reason — a skip is not a pass, so print `report.skips()` too when a run
 comes back cleaner than expected.
+
+## ClickHouse, and why it answers differently
+
+`moonclickhouse` speaks the server's HTTP interface: one statement per request, the
+query in the body, the values beside it. It is an `AsyncDriver` like the wire drivers,
+and it reports what the engine cannot do through `capabilities` — so check before you
+rely on it.
+
+<!-- nocheck -->
+```moonbit
+let db = @clickhouse.ClickHouseConn::connect("127.0.0.1", user="default")
+db.execute("CREATE TABLE hero (id Int32, name String) ENGINE = Memory", []) |> ignore
+db.execute("INSERT INTO hero VALUES (?, ?)", [Int(1), Text("Nova")]) |> ignore
+let rows = db.query("SELECT name FROM hero WHERE id = ?", [Int(1)])
+```
+
+- **`?` becomes `{p1:Type}`.** The driver picks the type from the bound case, so bind an
+  `Int` for an `Int32` column and an `Int64` for an `Int64` one; a mismatch is the
+  server's error, not a silent cast.
+- **No transactions.** `capabilities().transactions` is false and `begin`/`commit`/
+  `rollback` do nothing. Do not wrap several statements in one and expect atomicity.
+- **Nothing is prepared.** `prepare` re-sends the text with new values, which is what
+  the interface does anyway.
+- **A `String` column is bytes.** It reads back as `Text` when the bytes are UTF-8 and
+  as `Blob` when they are not — do not assume text.
 
 ## Gotchas
 

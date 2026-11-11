@@ -7,7 +7,7 @@
 The small, pure contract that sits between database *drivers* and query *layers* — MoonBit's answer to Go's [`database/sql/driver`](https://pkg.go.dev/database/sql/driver) and Python's [DB-API 2.0 (PEP 249)](https://peps.python.org/pep-0249/).
 
 [![Check and Test](https://img.shields.io/github/actions/workflow/status/moonbitstack/moondb/ci.yml?branch=master&label=CI&logo=github)](https://github.com/moonbitstack/moondb/actions)
-[![tests](https://img.shields.io/badge/tests-296%20passing-2ea44f)](#tests)
+[![tests](https://img.shields.io/badge/tests-298%20passing-2ea44f)](#tests)
 [![API docs](https://img.shields.io/badge/docs-moonbitstack.github.io-7c5cff)](https://moonbitstack.github.io/moondb/)
 [![mooncakes](https://img.shields.io/badge/mooncakes-Lfan--ke%2Fmoondb-1f6feb)](https://mooncakes.io/docs/moonbitstack/moondb)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -31,6 +31,7 @@ flowchart TD
       SQLITE["moonsqlite<br/><small>C-FFI, native</small>"]
       PG["moonpostgres<br/><small>pure-MoonBit wire</small>"]
       MYSQL["moonmysql<br/><small>pure-MoonBit wire</small>"]
+      CH["moonclickhouse<br/><small>pure-MoonBit HTTP</small>"]
       MOCK["MockDriver<br/><small>in-memory, ships here</small>"]
     end
     APP --> ORM --> IFACE
@@ -65,7 +66,7 @@ moon add moonbitstack/moondb
 | [`MockDriver`](#mockdriver) | dependency-free in-memory reference driver, for tests | — |
 | [`@blocking.Blocking`](docs/api.html#blocking) | a synchronous driver presented as an `AsyncDriver`, in `moonbitstack/moondb/blocking` | — |
 | [`@conformance.Report`](docs/api.html#conformance) | the contract as a case matrix any driver answers, in `moonbitstack/moondb/conformance` | — |
-| [`Dialect`](#dialects-and-capabilities) | `Sqlite` / `Postgres` / `Mysql`, and the placeholder each spells | — |
+| [`Dialect`](#dialects-and-capabilities) | `Sqlite` / `Postgres` / `Mysql` / `Clickhouse`, and the placeholder each spells | — |
 | [`Capabilities`](#dialects-and-capabilities) | what a backend can do beyond the base contract | — |
 | [`QueryExecutor`](#the-narrow-view) | the part of a driver that runs SQL, without the part that owns the connection | Go `Queryer` context, SQLAlchemy `Connection.exec_driver_sql` |
 | [`Stmt`](#one-statement-many-runs) | a statement prepared once and run with new values, plus `bind_named` | Go `*sql.Stmt`, JDBC `PreparedStatement` |
@@ -221,7 +222,7 @@ test "ask the driver, not the caller" {
 }
 ```
 
-`Capabilities` reports prepared statements, named parameters, server-side cursors, streaming `COPY`, savepoints, multiple result sets, unsigned 64-bit integers and `RETURNING` — what the driver in this repository implements, not what the server software could do in principle.
+`Capabilities` reports what the backend can do beyond the base contract: prepared statements, named parameters, server-side cursors, streaming `COPY`, transactions, savepoints, multiple result sets, unsigned 64-bit integers and `RETURNING` — what the driver in this repository implements, not what the server software could do in principle. `transactions` is its own flag because an analytical engine accepts `begin`/`commit`/`rollback` and does nothing, and a query layer has to know that before it wraps several statements in one unit of work.
 
 ## A blocking driver, seen as an async one
 
@@ -314,24 +315,25 @@ assert_eq(report.failures(), [])
 
 ## What each driver supports
 
-| | SQLite | PostgreSQL | MySQL |
-|---|:--:|:--:|:--:|
-| Prepared `Stmt` | yes | yes, with a statement cache | yes |
-| Named parameters | yes | yes | yes |
-| Server-side cursor | no | yes, `DECLARE`/`FETCH` in batches | no |
-| Streaming `COPY` | no | yes, both directions | no |
-| Savepoints | yes | yes | yes |
-| Multiple result sets | no | yes | yes |
-| Unsigned 64-bit | no | no | yes |
-| `RETURNING` | yes | yes | no |
-| Binary result format | — | opt-in, per column | prepared statements |
-| Long parameters (streamed) | — | — | yes, past 1 MiB |
+| | SQLite | PostgreSQL | MySQL | ClickHouse |
+|---|:--:|:--:|:--:|:--:|
+| Prepared `Stmt` | yes | yes, with a statement cache | yes | no, the HTTP interface re-sends |
+| Named parameters | yes | yes | yes | yes, rewritten to `{pN:Type}` |
+| Server-side cursor | no | yes, `DECLARE`/`FETCH` in batches | no | no |
+| Streaming `COPY` | no | yes, both directions | no | no |
+| Transactions | yes | yes | yes | no |
+| Savepoints | yes | yes | yes | no |
+| Multiple result sets | no | yes | yes | no |
+| Unsigned 64-bit | no | no | yes | yes |
+| `RETURNING` | yes | yes | no | no |
+| Binary result format | — | opt-in, per column | prepared statements | always, `RowBinary` |
+| Long parameters (streamed) | — | — | yes, past 1 MiB | — |
 
-Each driver's CI also runs the shared conformance matrix against servers of a different lineage that speak the same wire protocol — CockroachDB for PostgreSQL, TiDB for MySQL — and each driver's README lists the SQL differences those servers bring. A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement. Binary results and streamed parameters are driver-level choices rather than contract ones: they change how a value crosses the wire, not what the trait can express, so each driver exposes them on its own calls.
+Each driver's CI also runs the shared conformance matrix against servers of a different lineage — CockroachDB, openGauss and TiDB speak a ratified driver's wire protocol, and ClickHouse has a driver of its own — and each driver's README lists the differences those servers bring. A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement. Binary results and streamed parameters are driver-level choices rather than contract ones: they change how a value crosses the wire, not what the trait can express, so each driver exposes them on its own calls.
 
 ## Tests
 
-The conformance matrix runs against real PostgreSQL, MySQL, MariaDB, CockroachDB and TiDB in CI; SQLite has its own native suite. The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics and savepoint scope — both connection pools, the `:name` lexer (literals, identifiers, comments, dollar quotes, casts, JSONB operators, mixed conventions), the statement handles, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire: statement sequencing, the streaming guard, the post-error drain, the prepared handle, the server-side cursor and the COPY sub-protocol. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; breaking the savepoint rollback scope turns the nested-transaction tests red; breaking the dollar-quote lexing turns the named-parameter tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red; dropping the bridge's `prepare` delegation turns its statement test red; and not recording a binary result's column types turns the second-call test red. They run on all four backends:
+The conformance matrix runs against real PostgreSQL, MySQL, MariaDB, CockroachDB, openGauss, TiDB and ClickHouse in CI; SQLite has its own native suite. The suite covers the value model, every typed accessor and its error path, the error type, the reference driver — including real transaction rollback/commit semantics and savepoint scope — both connection pools, the `:name` lexer (literals, identifiers, comments, dollar quotes, casts, JSONB operators, mixed conventions), the statement handles, and the PostgreSQL protocol state machine driven off-machine over an in-memory wire: statement sequencing, the streaming guard, the post-error drain, the prepared handle, the server-side cursor and the COPY sub-protocol. Key behaviours are mutation-verified: breaking `rollback` turns the transaction tests red; breaking the savepoint rollback scope turns the nested-transaction tests red; breaking the dollar-quote lexing turns the named-parameter tests red; disabling the pool's `pre_ping` eviction or its `max_lifetime` retirement turns the corresponding pool tests red; dropping the `PgRowStream` guard, the post-error drain or the statement cache turns the offline protocol tests red; dropping the bridge's `prepare` delegation turns its statement test red; and not recording a binary result's column types turns the second-call test red. They run on all four backends:
 
 ```bash
 moon test --target all
