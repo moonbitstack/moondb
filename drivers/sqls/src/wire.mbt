@@ -11,8 +11,13 @@
 //   protocol has not switched over yet;
 // * afterwards, the TDS packets themselves are the plaintext inside TLS, headers included.
 //
-// So `send_packet` frames, `write_message` encrypts the framed bytes, and `read_message`
-// parses packets out of whatever the TLS layer hands back.
+// So `send_packet` frames, `write_message` encrypts the framed bytes one packet at a time,
+// and `read_message` parses packets out of whatever the TLS layer hands back.
+//
+// One record per packet is not an optimisation: a message longer than the negotiated packet
+// size arrives as several packets, and the server reads a record at a time, so sealing two
+// packets into one record leaves it waiting for the rest of the first and it drops the
+// connection. A statement, a value or a bulk batch over 4088 bytes was enough to hit it.
 
 ///|
 /// Big-endian `u16` at `at`.
@@ -200,20 +205,31 @@ async fn TdsWire::write_message(
   payload : Bytes,
 ) -> Unit raise @moondb.DbError {
   let stream = frame_message(kind, payload, 1)
-  let bytes = match self.tls {
-    None => stream
-    Some(tls) => {
-      tls.write(stream[:]) catch {
+  match self.tls {
+    None =>
+      (self.sock : &@io.Writer).write(stream) catch {
         _ =>
-          raise @moondb.QueryError(
-            "tds: the TLS layer refused to encrypt a message",
-          )
+          raise @moondb.ConnectError("tds: the connection closed while writing")
       }
-      tls.take()
+    Some(tls) => {
+      let mut at = 0
+      while at < stream.length() {
+        let length = be16(stream, at + 2)
+        tls.write(stream[at:at + length]) catch {
+          _ =>
+            raise @moondb.QueryError(
+              "tds: the TLS layer refused to encrypt a message",
+            )
+        }
+        (self.sock : &@io.Writer).write(tls.take()) catch {
+          _ =>
+            raise @moondb.ConnectError(
+              "tds: the connection closed while writing",
+            )
+        }
+        at = at + length
+      }
     }
-  }
-  (self.sock : &@io.Writer).write(bytes) catch {
-    _ => raise @moondb.ConnectError("tds: the connection closed while writing")
   }
 }
 
@@ -338,6 +354,7 @@ async fn TdsWire::read_message(
           kind = self.pending[0].to_int()
         }
         let status = self.pending[1].to_int()
+
         payload.write_bytes(self.pending[8:length])
         self.pending = self.pending[length:].to_owned()
         if (status & 1) != 0 {
@@ -347,6 +364,69 @@ async fn TdsWire::read_message(
       (kind, payload.to_bytes())
     }
   }
+}
+
+///|
+/// Run the client side of a TLS handshake whose records travel straight down the socket,
+/// with no TDS packet around them. TDS 8.0 puts the whole session inside TLS from the first
+/// byte, so there is no prelogin to carry the handshake and no header to frame it.
+async fn TdsWire::start_tls_direct(
+  self : TdsWire,
+  config : @tls.Client,
+  host : String,
+) -> Unit raise @moondb.DbError {
+  let tls = @tls.Conn::client(
+    config,
+    host,
+    rand=fn(n) {
+      guard @env.rand(n) is Some(bytes) else { abort("no system entropy") }
+      bytes
+    },
+    now=(@env.now() / 1000UL).reinterpret_as_int64(),
+  ) catch {
+    _ => raise @moondb.ConnectError("tds: cannot start a TLS session")
+  }
+  let mut out = tls.take()
+  while out.length() > 0 {
+    (self.sock : &@io.Writer).write(out) catch {
+      _ =>
+        raise @moondb.ConnectError(
+          "tds: the connection closed during the TLS handshake",
+        )
+    }
+    out = tls.take()
+  }
+  while !tls.is_connected() {
+    let cipher = (self.sock : &@io.Reader).read_some(max_len=16384) catch {
+      _ => None
+    }
+    match cipher {
+      None =>
+        raise @moondb.ConnectError(
+          "tds: the server closed during the TLS handshake",
+        )
+      Some(bytes) => {
+        tls.receive(bytes[:]) catch {
+          _ =>
+            raise @moondb.ConnectError(
+              "tds: the server's TLS handshake was rejected",
+            )
+        }
+        out = tls.take()
+        while out.length() > 0 {
+          (self.sock : &@io.Writer).write(out) catch {
+            _ =>
+              raise @moondb.ConnectError(
+                "tds: the connection closed during the TLS handshake",
+              )
+          }
+          out = tls.take()
+        }
+      }
+    }
+  }
+  self.pending = tls.read()
+  self.tls = Some(tls)
 }
 
 ///|

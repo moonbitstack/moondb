@@ -141,9 +141,15 @@ fn declaration_of(value : @moondb.Value) -> String {
 }
 
 ///|
-/// A `PLP` value: the total length, one chunk, and the terminator.
+/// A `PLP` value: one chunk, and the terminator.
+///
+/// The total length is `UNKNOWN_PLP_LEN` (`0xFFFFFFFFFFFFFFFE`) rather than the real one.
+/// Both are legal on the wire, but the server reads a declared length as "exactly this many
+/// bytes follow, chunk headers included" and then stops one chunk short: a parameter larger
+/// than the packet size arrives truncated at the packet boundary, with no error, and the
+/// value that comes back is a prefix of the one that went out.
 fn plp(out : Buffer, data : Bytes) -> Unit {
-  put_u64(out, data.length().to_int64())
+  put_u64(out, -2L)
   if data.length() > 0 {
     put_u32(out, data.length())
     out.write_bytes(data)
@@ -162,10 +168,10 @@ fn put_param_name(out : Buffer, name : String) -> Unit {
 }
 
 ///|
-/// One RPC parameter: its name, a status byte, then its type and value.
-fn rpc_param(out : Buffer, name : String, value : @moondb.Value) -> Unit {
-  put_param_name(out, name)
-  out.write_byte(b'\x00') // status
+/// One value as an RPC parameter body: its type, then its value. The types are the
+/// nullable spellings — INTN, BITN, FLTN — so a `NULL` is expressible without a second
+/// declaration for every column that might be missing.
+fn put_typed_value(out : Buffer, value : @moondb.Value) -> Unit {
   match value {
     @moondb.Null => {
       out.write_byte(b'\x26') // INTN
@@ -242,36 +248,76 @@ fn nvarchar_value(out : Buffer, text : String) -> Unit {
 }
 
 ///|
-/// The RPC message: an `sp_executesql` call whose first two parameters are the statement
-/// and its parameter declaration, followed by the values themselves.
-fn build_rpc(sql : String, params : Array[@moondb.Value], txn : Bytes) -> Bytes {
+/// One RPC parameter: its name, a status byte, then its type and value. `by_ref` marks an
+/// `OUTPUT` parameter — the handle `sp_prepare` hands back arrives that way.
+priv struct RpcParam {
+  name : String
+  value : @moondb.Value
+  by_ref : Bool
+}
+
+///|
+/// One RPC parameter on the wire.
+fn put_rpc_param(out : Buffer, param : RpcParam) -> Unit {
+  put_param_name(out, param.name)
+  out.write_byte(if param.by_ref { b'\x01' } else { b'\x00' })
+  put_typed_value(out, param.value)
+}
+
+///|
+/// An RPC message: the transaction-manager header, the procedure, then its parameters.
+/// A system procedure is addressed by its well-known id — `0xFFFF` announces that the next
+/// two bytes are that id — which is how `sp_executesql`, `sp_prepare`, `sp_execute` and
+/// `sp_unprepare` are called without a name lookup.
+fn build_rpc_message(
+  proc_id : Int32,
+  params : Array[RpcParam],
+  txn : Bytes,
+) -> Bytes {
   let out = Buffer()
   out.write_bytes(all_headers(txn))
-  // A system procedure is addressed by its well-known id: `0xFFFF` announces that the
-  // next two bytes are that id, here 10 for `sp_executesql`.
   put_u16(out, 0xFFFF)
-  put_u16(out, 10)
+  put_u16(out, proc_id)
   put_u16(out, 0) // option flags
+  for param in params {
+    put_rpc_param(out, param)
+  }
+  packet(0x03, out.to_bytes())
+}
+
+///|
+/// The declaration list `sp_executesql` and `sp_prepare` take beside the statement:
+/// `@p1 int, @p2 nvarchar(max)`, one entry per value.
+fn declaration_list(params : Array[@moondb.Value]) -> String {
   let decls = Buffer()
   for i = 0; i < params.length(); i = i + 1 {
     if i > 0 {
-      decls.write_byte(b',')
-      decls.write_byte(b' ')
+      decls.write_bytes(@utf8.encode(", "))
     }
-    decls.write_byte(b'@')
-    decls.write_byte(b'p')
-    decls.write_bytes(@utf8.encode((i + 1).to_string()))
-    decls.write_byte(b' ')
+    decls.write_bytes(@utf8.encode("@p" + (i + 1).to_string() + " "))
     decls.write_bytes(@utf8.encode(declaration_of(params[i])))
   }
-  put_param_name(out, "@statement")
-  out.write_byte(b'\x00')
-  nvarchar_value(out, sql)
-  put_param_name(out, "@params")
-  out.write_byte(b'\x00')
-  nvarchar_value(out, decode_lossy(decls.to_bytes()))
+  decode_lossy(decls.to_bytes())
+}
+
+///|
+/// The RPC message: an `sp_executesql` call whose first two parameters are the statement
+/// and its parameter declaration, followed by the values themselves.
+fn build_rpc(sql : String, params : Array[@moondb.Value], txn : Bytes) -> Bytes {
+  let call : Array[RpcParam] = [
+    { name: "@statement", value: @moondb.Text(sql), by_ref: false, },
+    {
+      name: "@params",
+      value: @moondb.Text(declaration_list(params)),
+      by_ref: false,
+    },
+  ]
   for i = 0; i < params.length(); i = i + 1 {
-    rpc_param(out, "@p" + (i + 1).to_string(), params[i])
+    call.push({
+      name: "@p" + (i + 1).to_string(),
+      value: params[i],
+      by_ref: false,
+    })
   }
-  packet(0x03, out.to_bytes())
+  build_rpc_message(10, call, txn)
 }

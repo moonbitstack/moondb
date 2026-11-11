@@ -14,6 +14,9 @@ priv struct Column {
   name : String
   ty : Int32
   scale : Int32
+  /// The declared maximum length of a variable-length column, or 0. `0xFFFF` means `(max)`,
+  /// which is the one case where a value is a `PLP` run rather than a length and its bytes.
+  maxlen : Int32
 }
 
 ///|
@@ -78,6 +81,7 @@ fn read_column(c : Cursor) -> Column raise @moondb.DbError {
   c.u16le() |> ignore // flags
   let ty = c.u8()
   let mut scale = 0
+  let mut maxlen = 0
   if ty == 0x30 ||
     ty == 0x32 ||
     ty == 0x34 ||
@@ -104,12 +108,12 @@ fn read_column(c : Cursor) -> Column raise @moondb.DbError {
   } else if ty == 0x29 || ty == 0x2A {
     scale = c.u8()
   } else if ty == 0xA5 || ty == 0xAD || ty == 0xA7 || ty == 0xAF {
-    c.u16le() |> ignore
+    maxlen = c.u16le()
     if ty == 0xA7 || ty == 0xAF {
       c.skip(5) // collation
     }
   } else if ty == 0xE7 || ty == 0xEF {
-    c.u16le() |> ignore
+    maxlen = c.u16le()
     c.skip(5) // collation
   } else {
     raise @moondb.Server({
@@ -124,14 +128,19 @@ fn read_column(c : Cursor) -> Column raise @moondb.DbError {
   }
   let chars = c.u8()
   let name = c.ucs2(chars)
-  { name, ty, scale, }
+  { name, ty, scale, maxlen, }
 }
 
 ///|
 /// A `PLP` value — how `varchar(max)`, `nvarchar(max)` and `varbinary(max)` travel: a
 /// total length and a run of chunks, terminated by a zero-length chunk.
-fn read_plp(c : Cursor) -> Bytes raise @moondb.DbError {
-  c.u64le() |> ignore
+fn read_plp(c : Cursor) -> Bytes? raise @moondb.DbError {
+  // The total length is advisory; a client may be told the real one or "unknown". All ones
+  // is the other thing it can be: `NULL`.
+  let total = c.u64le()
+  if total == -1L {
+    return None
+  }
   let out = Buffer()
   for ;; {
     let size = c.u32le()
@@ -140,7 +149,7 @@ fn read_plp(c : Cursor) -> Bytes raise @moondb.DbError {
     }
     out.write_bytes(c.take(size))
   }
-  out.to_bytes()
+  Some(out.to_bytes())
 }
 
 ///|
@@ -204,26 +213,48 @@ fn read_value(c : Cursor, col : Column) -> @moondb.Value raise @moondb.DbError {
       raise @moondb.QueryError("tds: a float of " + n.to_string() + " bytes")
     }
   }
+  // Whether a value is a `PLP` run is a property of the column, not of the value: the
+  // length it starts with looks exactly like the first two bytes of a `PLP` total, so
+  // deciding from the value itself reads a `(max)` column as a short one and loses the
+  // token stream from there.
   if ty == 0xE7 || ty == 0xEF {
     // An `nvarchar` value's length is in bytes, not characters — which is also how the
     // type info declares its maximum, twice the character count.
+    if col.maxlen == 0xFFFF {
+      return match read_plp(c) {
+        Some(bytes) => @moondb.Text(decode_utf16(bytes))
+        None => @moondb.Null
+      }
+    }
     let bytes = c.u16le()
     if bytes == 0xFFFF {
-      return @moondb.Text(decode_utf16(read_plp(c)))
+      return @moondb.Null
     }
     return @moondb.Text(decode_utf16(c.take(bytes)))
   }
   if ty == 0xA7 || ty == 0xAF {
+    if col.maxlen == 0xFFFF {
+      return match read_plp(c) {
+        Some(bytes) => @moondb.Text(decode_lossy(bytes))
+        None => @moondb.Null
+      }
+    }
     let n = c.u16le()
     if n == 0xFFFF {
-      return @moondb.Text(decode_lossy(read_plp(c)))
+      return @moondb.Null
     }
     return @moondb.Text(decode_lossy(c.take(n)))
   }
   if ty == 0xA5 || ty == 0xAD {
+    if col.maxlen == 0xFFFF {
+      return match read_plp(c) {
+        Some(bytes) => @moondb.Blob(bytes)
+        None => @moondb.Null
+      }
+    }
     let n = c.u16le()
     if n == 0xFFFF {
-      return @moondb.Blob(read_plp(c))
+      return @moondb.Null
     }
     return @moondb.Blob(c.take(n))
   }
