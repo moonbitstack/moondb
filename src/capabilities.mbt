@@ -120,14 +120,15 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         unsigned_integers: true,
         returning: true,
       }
-    // SQL Server binds parameters out of band through `sp_executesql`, nests
-    // transactions through savepoints, and has an `OUTPUT` clause where the others have
-    // `RETURNING`. It has no server-side cursor of the `DECLARE`/`FETCH` kind this flag
-    // means, and no unsigned 64-bit column.
+    // SQL Server binds parameters out of band through `sp_executesql` and compiles a text
+    // once into a handle with `sp_prepare`, which `sp_execute` then re-runs with new
+    // values. It nests transactions through savepoints and has an `OUTPUT` clause where the
+    // others have `RETURNING`. It has no server-side cursor of the `DECLARE`/`FETCH` kind
+    // this flag means, and no unsigned 64-bit column.
     Sqlserver =>
       {
         dialect,
-        prepared_statements: false,
+        prepared_statements: true,
         named_parameters: true,
         server_cursors: false,
         streaming_copy: false,

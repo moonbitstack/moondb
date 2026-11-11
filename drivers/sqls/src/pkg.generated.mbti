@@ -10,6 +10,8 @@ import {
 // Values
 pub fn permissive_tls() -> @tls.Client
 
+pub fn strict_tls() -> @tls.Client
+
 // Errors
 
 // Types and methods
@@ -20,10 +22,11 @@ pub struct SqlServerConn {
   mut txn : Bytes
 }
 pub async fn SqlServerConn::begin(Self) -> Unit raise @moondb.DbError
+pub async fn SqlServerConn::bulk_copy(Self, String, Array[String], Array[Array[@moondb.Value]]) -> Int64 raise @moondb.DbError
 pub fn SqlServerConn::capabilities(Self) -> @moondb.Capabilities
 pub async fn SqlServerConn::close(Self) -> Unit
 pub async fn SqlServerConn::commit(Self) -> Unit raise @moondb.DbError
-pub async fn SqlServerConn::connect(String, Int32, String, String, String, encrypt? : Bool, tls? : @tls.Client) -> Self raise @moondb.DbError
+pub async fn SqlServerConn::connect(String, Int32, String, String, String, encrypt? : Bool, strict? : Bool, tls? : @tls.Client) -> Self raise @moondb.DbError
 pub fn SqlServerConn::database(Self) -> String
 pub fn SqlServerConn::dialect(Self) -> @moondb.Dialect
 pub async fn SqlServerConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
@@ -38,6 +41,8 @@ pub struct SqlServerStmt {
   conn : SqlServerConn
   sql : String
   mut params : Array[@moondb.Value]
+  mut handle : Int32
+  mut declaration : String
   mut closed : Bool
 }
 pub async fn SqlServerStmt::bind(Self, Array[@moondb.Value]) -> Unit raise @moondb.DbError

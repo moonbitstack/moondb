@@ -189,3 +189,104 @@ test "login7 carries the extension block a 7.4 login must have" {
   assert_eq(payload[94 + 82 + 4 + 48].to_int(), 0x0a)
   assert_eq(payload[94 + 82 + 4 + 48 + 6].to_int(), 0xff)
 }
+
+///|
+test "TDS 8.0 announces itself in the login and asks for no further encryption" {
+  // The version field is the first four bytes of LOGIN7's payload.
+  let strict = payload_of(
+    build_login("h", "sa", "p", "master", "app", version=0x08000000),
+  )
+  assert_eq(le32(strict, 4), 0x08000000)
+  let seven_four = payload_of(build_login("h", "sa", "p", "master", "app"))
+  assert_eq(le32(seven_four, 4), 0x74000004)
+  // In strict mode the whole session is already inside TLS, so prelogin asks for nothing
+  // more: ENCRYPT_OFF, which is a zero where the "on" value sits in the common case.
+  let off = build_prelogin(Encryption::Off)
+  let offset = be16(off, 13 + 1)
+  assert_eq(off[8 + offset].to_int(), 0)
+}
+
+///|
+test "sp_prepare is an RPC by id whose handle is an OUTPUT parameter" {
+  let call : Array[RpcParam] = [
+    { name: "@handle", value: @moondb.Int(0), by_ref: true, },
+    { name: "@params", value: @moondb.Text("@p1 int"), by_ref: false, },
+    { name: "@stmt", value: @moondb.Text("SELECT @p1"), by_ref: false, },
+  ]
+  let message = payload_of(build_rpc_message(11, call, eight_zeroes()))
+  // ALL_HEADERS is 22 bytes; the procedure follows: 0xFFFF then the id.
+  assert_eq(le16(message, 22), 0xFFFF)
+  assert_eq(le16(message, 24), 11)
+  assert_eq(le16(message, 26), 0) // option flags
+  // The first parameter's name is "@handle": five... seven characters and its status byte
+  // is the OUTPUT flag.
+  let name_at = 28
+  assert_eq(message[name_at].to_int(), 7)
+  assert_eq(@utf16.decode(message[name_at + 1:name_at + 15]), "@handle")
+  assert_eq(message[name_at + 15].to_int(), 1)
+}
+
+///|
+fn eight_zeroes() -> Bytes {
+  b"\x00\x00\x00\x00\x00\x00\x00\x00"
+}
+
+///|
+test "a RETURNVALUE token gives back the handle sp_prepare assigned" {
+  let payload = Buffer()
+  payload.write_byte(b'\xac')
+  payload.write_byte(b'\x01') // ordinal, little-endian
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00') // no parameter name
+  payload.write_byte(b'\x01') // status: OUTPUT
+  payload.write_byte(b'\x00') // user type
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x01') // flags: by reference
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x26') // INTN
+  payload.write_byte(b'\x04') // declared length
+  payload.write_byte(b'\x04') // value length
+  payload.write_byte(b'\x2a') // 42
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\xfd') // DONE
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  payload.write_byte(b'\x00')
+  for _ in 0..<8 {
+    payload.write_byte(b'\x00')
+  }
+  let response = parse_response(payload.to_bytes())
+  assert_eq(response.return_value, Some(42))
+}
+
+///|
+test "a bulk stream declares its columns and writes a PLP cell as one unknown-length run" {
+  let columns : Array[BulkColumn] = [
+    { name: "id", ty: 0x26, },
+    { name: "label", ty: 0xE7, },
+  ]
+  let rows : Array[Array[@moondb.Value]] = [
+    [@moondb.Int64(7L), @moondb.Text("ab")],
+  ]
+  let load = build_bulk_load(columns, rows)
+  // COLMETADATA, two columns.
+  assert_eq(load[0].to_int(), 0x81)
+  assert_eq(le16(load, 1), 2)
+  // The first column's type is INTN with an eight-byte maximum.
+  assert_eq(load[9].to_int(), 0x26)
+  assert_eq(load[10].to_int(), 8)
+  // The row token, then the integer cell: eight bytes of value, little-endian.
+  let row_at = load.length() - 1 - 2 - 2 - 8 - 1 - (9 + 8 + 4 + 4 + 4)
+  assert_eq(load[row_at].to_int(), 0xD1)
+  assert_eq(load[row_at + 1].to_int(), 8)
+  // The text cell is a PLP run whose total length is "unknown", not the real length.
+  let cell_at = row_at + 10
+  assert_eq(load[cell_at].to_int(), 0xFE)
+  assert_eq(load[cell_at + 1].to_int(), 0xFF)
+  assert_eq(load[cell_at + 8].to_int(), 4) // one chunk of four bytes
+}

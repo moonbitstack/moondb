@@ -15,6 +15,9 @@ priv struct Response {
   /// A new transaction descriptor, when the server changed one: a `BEGIN` hands out the
   /// descriptor every later request inside the transaction has to carry.
   txn : Bytes?
+  /// The integer a procedure returned through an `OUTPUT` parameter, when it returned one.
+  /// `sp_prepare` hands back its statement handle this way.
+  return_value : Int32?
 }
 
 ///|
@@ -25,6 +28,7 @@ fn parse_response(payload : Bytes) -> Response raise @moondb.DbError {
   let mut failure : ServerMessage? = None
   let mut txn : Bytes? = None
   let mut rows_affected = 0L
+  let mut return_value : Int32? = None
   let mut current : Array[Column] = []
   let mut rows : Array[@moondb.Row] = []
   let mut open = false
@@ -78,7 +82,12 @@ fn parse_response(payload : Bytes) -> Response raise @moondb.DbError {
         let length = c.u16le()
         let body = Cursor::new(c.take(length))
         let detail = read_server_message(body)
-        failure = Some(detail)
+        // A failed batch reports every error it hit and then a summary — "Statement(s)
+        // could not be prepared" — which says nothing about what was wrong. The first one
+        // is the specific one, so it is the one kept.
+        if failure is None {
+          failure = Some(detail)
+        }
       }
       0xAB => {
         let length = c.u16le()
@@ -115,6 +124,13 @@ fn parse_response(payload : Bytes) -> Response raise @moondb.DbError {
           c.skip(length)
         }
       0x79 => c.u32le() |> ignore
+      // RETURNVALUE: what an OUTPUT parameter came back holding. `sp_prepare` returns its
+      // statement handle this way, so the value is read out rather than skipped.
+      0xAC =>
+        match read_return_value(c) {
+          Some(value) => return_value = Some(value)
+          None => ()
+        }
       0xFD | 0xFE | 0xFF => {
         let status = c.u16le()
         c.u16le() |> ignore
@@ -132,7 +148,43 @@ fn parse_response(payload : Bytes) -> Response raise @moondb.DbError {
   if open {
     sets.push(rows)
   }
-  { sets, rows_affected, failure, txn, }
+  { sets, rows_affected, failure, txn, return_value, }
+}
+
+///|
+/// One `RETURNVALUE`: the ordinal and name of the parameter it belongs to, then the value in
+/// the same type-tagged form an RPC parameter uses. Only an integer is of any use here — the
+/// handle `sp_prepare` hands out — so everything else is read past and reported as `None`.
+fn read_return_value(c : Cursor) -> Int32? raise @moondb.DbError {
+  c.u16le() |> ignore // ordinal
+  let chars = c.u8()
+  c.skip(chars * 2) // the parameter's name
+  c.u8() |> ignore // status: the OUTPUT flag
+  c.u32le() |> ignore // user type
+  c.u16le() |> ignore // flags
+  let ty = c.u8()
+  // INTN carries its own length, so a four- or eight-byte integer reads the same way.
+  if ty == 0x26 {
+    c.u8() |> ignore // the maximum length the parameter was declared with
+    let length = c.u8()
+    if length == 0 {
+      return None
+    }
+    let low = c.u32le()
+    if length == 8 {
+      c.u32le() |> ignore
+    }
+    return Some(low)
+  }
+  raise @moondb.Server({
+    kind: @moondb.ErrorKind::NotSupported,
+    sqlstate: None,
+    code: None,
+    message: "moonsqls cannot read a " + type_name(ty) + " return value",
+    detail: None,
+    hint: None,
+    severity: None,
+  })
 }
 
 ///|

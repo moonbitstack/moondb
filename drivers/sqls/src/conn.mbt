@@ -28,9 +28,31 @@ pub fn permissive_tls() -> @tls.Client {
 }
 
 ///|
+/// The configuration a TDS 8.0 session needs: the same permissive trust as
+/// [`permissive_tls`], plus the ALPN protocol `tds/8.0`. The server uses ALPN to tell which
+/// protocol version a TLS connection that started before any TDS byte is carrying; without
+/// it the handshake is refused, so a caller who supplies their own configuration for a
+/// strict connection has to name the protocol themselves.
+pub fn strict_tls() -> @tls.Client {
+  let roots = @x509.Roots::new() catch {
+    _ => abort("cannot create an empty trust store")
+  }
+  @tls.Client::new(
+    roots,
+    verify=@tls.Verify::Custom(fn(_certs, _host) { () }),
+    alpn=["tds/8.0"],
+  )
+}
+
+///|
 /// Open a connection. `encrypt` defaults to true: the login packet carries a password, and
 /// prelogin is where the client says so. A server that answers "encryption not supported"
 /// gets a clear session, because the alternative is refusing to connect to it.
+///
+/// `strict` selects TDS 8.0, where TLS is not negotiated at all: it has already started
+/// before the first TDS byte, so prelogin and the login inside it are encrypted whether the
+/// server would have offered encryption or not. A server older than SQL Server 2022 fails
+/// the handshake — which is the point of asking for it.
 pub async fn SqlServerConn::connect(
   host : String,
   port : Int32,
@@ -38,6 +60,7 @@ pub async fn SqlServerConn::connect(
   password : String,
   database : String,
   encrypt~ : Bool = true,
+  strict~ : Bool = false,
   tls? : @tls.Client,
 ) -> SqlServerConn raise @moondb.DbError {
   let addr = @socket.Addr::resolve(host, port~) catch {
@@ -54,31 +77,53 @@ pub async fn SqlServerConn::connect(
   }
   let wire = TdsWire::new(sock)
   errdefer wire.close()
+  let config = match tls {
+    Some(config) => config
+    None => if strict { strict_tls() } else { permissive_tls() }
+  }
+  if strict {
+    // TDS 8.0: the handshake comes first and the prelogin travels inside it. What the
+    // prelogin then asks for is "no further encryption", because there is nothing left to
+    // encrypt — the whole session is already inside TLS.
+    wire.start_tls_direct(config, host)
+  }
   wire.write_message(
     0x12,
     payload_of(
-      build_prelogin(if encrypt { Encryption::On } else { Encryption::Off }),
+      build_prelogin(
+        if strict {
+          Encryption::Off
+        } else if encrypt {
+          Encryption::On
+        } else {
+          Encryption::Off
+        },
+      ),
     ),
   )
   let (_, answer) = wire.read_message()
   let negotiated = parse_prelogin(answer)
-  println(
-    "prelogin answer enc=" +
-    negotiated.to_string() +
-    " len=" +
-    answer.length().to_string(),
-  )
-  // 1 = on, 3 = required; 0 and 2 leave the session in the clear.
-  if negotiated == 1 || negotiated == 3 {
-    let config = match tls {
-      Some(config) => config
-      None => permissive_tls()
-    }
+  // 1 = on, 3 = required; 0 and 2 leave the session in the clear. In strict mode the
+  // handshake has already run, so the answer only says whether the server noticed.
+  if !strict && (negotiated == 1 || negotiated == 3) {
     wire.start_tls(config, host)
+  } else if negotiated == 3 && encrypt {
+    raise @moondb.ConnectError(
+      "tds: the server requires encryption and the TLS handshake did not run",
+    )
   }
   wire.write_message(
     0x10,
-    payload_of(build_login(host, user, password, database, host)),
+    payload_of(
+      build_login(
+        host,
+        user,
+        password,
+        database,
+        host,
+        version=if strict { 0x08000000 } else { 0x74000004 },
+      ),
+    ),
   )
   let (_, login_answer) = wire.read_message()
   let outcome = parse_response(login_answer)
@@ -125,6 +170,30 @@ fn SqlServerConn::check_open(
 }
 
 ///|
+/// Send one message and read its answer: the transaction descriptor the server handed out,
+/// the failure it reported, and the tokens in between. Every request on this connection
+/// goes through here, which is how a transaction's descriptor reaches the next request
+/// without each caller remembering it.
+async fn SqlServerConn::exchange(
+  self : SqlServerConn,
+  message : Bytes,
+) -> Response raise @moondb.DbError {
+  self.check_open()
+  self.wire.write_message(message[0].to_int(), payload_of(message))
+  let (_, payload) = self.wire.read_message()
+  let response = parse_response(payload)
+  match response.txn {
+    Some(descriptor) => self.txn = descriptor
+    None => ()
+  }
+  match response.failure {
+    Some(detail) => raise error_of(detail)
+    None => ()
+  }
+  response
+}
+
+///|
 /// Run one statement and read its answer.
 async fn SqlServerConn::run(
   self : SqlServerConn,
@@ -132,8 +201,8 @@ async fn SqlServerConn::run(
   params : Array[@moondb.Value],
 ) -> Response raise @moondb.DbError {
   self.check_open()
-  if params.length() == 0 {
-    self.wire.write_message(0x01, payload_of(build_sql_batch(sql, self.txn)))
+  let message = if params.length() == 0 {
+    build_sql_batch(sql, self.txn)
   } else {
     let rewritten = rewrite(sql)
     let slots = count_placeholders(sql)
@@ -146,22 +215,9 @@ async fn SqlServerConn::run(
         " values",
       )
     }
-    self.wire.write_message(
-      0x03,
-      payload_of(build_rpc(rewritten, params, self.txn)),
-    )
+    build_rpc(rewritten, params, self.txn)
   }
-  let (_, payload) = self.wire.read_message()
-  let response = parse_response(payload)
-  match response.txn {
-    Some(descriptor) => self.txn = descriptor
-    None => ()
-  }
-  match response.failure {
-    Some(detail) => raise error_of(detail)
-    None => ()
-  }
-  response
+  self.exchange(message)
 }
 
 ///|
@@ -242,12 +298,17 @@ pub impl @moondb.AsyncDriver for SqlServerConn with fn ping(self) {
 }
 
 ///|
-/// A handle that runs one SQL text with new values on every call. TDS's server-side
-/// prepare (`sp_prepare`) is a separate RPC pair this driver does not use yet, so the text
-/// travels again — the values still travel beside it, never inside it.
+/// Compile the text into a server-side handle. `sp_prepare` needs the type of every
+/// parameter, and those types come from the values, so a statement with placeholders is
+/// compiled at its first `bind`; one without is compiled here, where a syntax error
+/// belongs.
 pub impl @moondb.AsyncDriver for SqlServerConn with fn prepare(self, sql) {
   self.check_open()
-  SqlServerStmt::new(self, sql)
+  let stmt = SqlServerStmt::new(self, sql)
+  if count_placeholders(sql) == 0 {
+    stmt.ensure_plan()
+  }
+  stmt
 }
 
 ///|

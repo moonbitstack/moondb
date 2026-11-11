@@ -122,6 +122,7 @@ fn build_login(
   password : String,
   database : String,
   app : String,
+  version~ : Int32 = 0x74000004,
 ) -> Bytes {
   let host_b = @utf16.encode(host)
   let user_b = @utf16.encode(user)
@@ -179,8 +180,12 @@ fn build_login(
   for i = 0; i < 4; i = i + 1 {
     head.write_byte(((total >> (i * 8)) & 0xFF).to_byte())
   }
-  // TDS 7.4, a 4096-byte packet, no client version, a pid, no connection id.
-  for b in [0x04, 0x00, 0x00, 0x74, 0x00, 0x10, 0x00, 0x00] {
+  // The protocol version, then a 4096-byte packet, no client version, a pid, no
+  // connection id. 7.4 announces itself as 0x74000004, 8.0 as 0x08000000.
+  for i = 0; i < 4; i = i + 1 {
+    head.write_byte(((version >> (i * 8)) & 0xFF).to_byte())
+  }
+  for b in [0x00, 0x10, 0x00, 0x00] {
     head.write_byte(b.to_byte())
   }
   for

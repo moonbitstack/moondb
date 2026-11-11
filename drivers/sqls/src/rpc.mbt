@@ -158,6 +158,12 @@ fn plp(out : Buffer, data : Bytes) -> Unit {
 }
 
 ///|
+/// A `NULL` where the column's values are sent as `PLP`: the total length is all ones.
+fn plp_null(out : Buffer) -> Unit {
+  put_u64(out, -1L)
+}
+
+///|
 /// The name of an RPC parameter: a one-byte character count, then the name in UTF-16. The
 /// leading `@` is part of it — `sp_executesql` addresses its own formal parameters by
 /// name, and an unnamed first parameter is refused with "the parameter name is invalid".
