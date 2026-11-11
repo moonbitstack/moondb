@@ -20,7 +20,7 @@ keywords = [
   "moonbit",
 ]
 
-description = "TiDB for moondb — moonmysql' wire protocol, with the server's own capability report and version detection."
+description = "TiDB for moondb — the moonmysql wire protocol, with the server's own capability report and version detection."
 
 preferred_target = "native"
 

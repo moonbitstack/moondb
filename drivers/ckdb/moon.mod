@@ -19,7 +19,7 @@ keywords = [
   "moonbit",
 ]
 
-description = "CockroachDB for moondb — moonpostgres' wire protocol, with the server's own capability report and version detection."
+description = "CockroachDB for moondb — the moonpostgres wire protocol, with the server's own capability report and version detection."
 
 preferred_target = "native"
 
