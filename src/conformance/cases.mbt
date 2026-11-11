@@ -274,6 +274,16 @@ fn expect_programming_error(
         e.kind() == @moondb.ErrorKind::Database,
         "a malformed statement raised " + e.to_string(),
       )
+    // ClickHouse reports a parser error as a `Server` error with its own code, which
+    // the driver maps onto `Programming`; there is no SQLSTATE to quote.
+    Clickhouse =>
+      expect(
+        e.kind() == @moondb.ErrorKind::Programming,
+        "a malformed statement was classified " +
+        e.kind().to_string() +
+        ": " +
+        e.to_string(),
+      )
     _ =>
       expect(
         e.kind() == @moondb.ErrorKind::Programming,

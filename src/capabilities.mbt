@@ -35,6 +35,10 @@ pub(all) struct Capabilities {
   server_cursors : Bool
   /// `COPY` in both directions is streamed chunk by chunk.
   streaming_copy : Bool
+  /// `begin` / `commit` / `rollback` bracket real work. An engine without
+  /// transactions accepts the calls and does nothing, so a query layer must know
+  /// before it wraps a multi-statement unit of work in one.
+  transactions : Bool
   /// Nested transactions roll back to a savepoint instead of the whole transaction.
   savepoints : Bool
   /// One statement can return more than one result set.
@@ -56,6 +60,7 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: false,
         streaming_copy: false,
+        transactions: true,
         savepoints: true,
         multiple_result_sets: false,
         unsigned_integers: false,
@@ -68,6 +73,7 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: true,
         streaming_copy: true,
+        transactions: true,
         savepoints: true,
         multiple_result_sets: true,
         unsigned_integers: false,
@@ -80,8 +86,26 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: false,
         streaming_copy: false,
+        transactions: true,
         savepoints: true,
         multiple_result_sets: true,
+        unsigned_integers: true,
+        returning: false,
+      }
+    // ClickHouse is an analytical engine: one statement, one result, no
+    // transactions to nest and no server-side cursor to hold open. What it does have
+    // is anonymous (`?`) binding, which its driver rewrites into its own parameter
+    // syntax, and 64-bit unsigned columns.
+    Clickhouse =>
+      {
+        dialect,
+        prepared_statements: false,
+        named_parameters: true,
+        server_cursors: false,
+        streaming_copy: false,
+        transactions: false,
+        savepoints: false,
+        multiple_result_sets: false,
         unsigned_integers: true,
         returning: false,
       }
@@ -103,6 +127,7 @@ pub fn Capabilities::count(self : Capabilities) -> Int32 {
     self.named_parameters,
     self.server_cursors,
     self.streaming_copy,
+    self.transactions,
     self.savepoints,
     self.multiple_result_sets,
     self.unsigned_integers,

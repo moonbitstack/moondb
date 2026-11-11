@@ -86,12 +86,18 @@ pub async fn check(conn : &@moondb.AsyncDriver, table? : String) -> Report {
     case_cursor(conn, probe)
   })
   |> ignore
-  push(cases, "transaction: a rollback discards the work", () => {
-    case_rollback(conn, probe)
-  })
-  |> ignore
-  push(cases, "transaction: a commit keeps it", () => case_commit(conn, probe))
-  |> ignore
+  if caps.transactions {
+    push(cases, "transaction: a rollback discards the work", () => {
+      case_rollback(conn, probe)
+    })
+    |> ignore
+    push(cases, "transaction: a commit keeps it", () => case_commit(conn, probe))
+    |> ignore
+  } else {
+    let reason = "the engine has no transactions; begin/commit/rollback do nothing"
+    skip(cases, "transaction: a rollback discards the work", reason)
+    skip(cases, "transaction: a commit keeps it", reason)
+  }
   if caps.savepoints {
     push(cases, "transaction: a savepoint undoes exactly one level", () => {
       case_savepoint(conn, probe)
@@ -102,10 +108,19 @@ pub async fn check(conn : &@moondb.AsyncDriver, table? : String) -> Report {
       cases, "transaction: a savepoint undoes exactly one level", "the driver reports no savepoints",
     )
   }
-  push(cases, "error: a duplicate key is refused and classified", () => {
-    case_duplicate_key(conn, probe)
-  })
-  |> ignore
+  // A key is only "duplicate" where the engine enforces uniqueness; an analytical
+  // table without a key constraint accepts the second insert, and asserting otherwise
+  // would be asserting a feature the backend never claimed.
+  if probe.dialect == @moondb.Dialect::Clickhouse {
+    skip(
+      cases, "error: a duplicate key is refused and classified", "the engine enforces no unique constraints",
+    )
+  } else {
+    push(cases, "error: a duplicate key is refused and classified", () => {
+      case_duplicate_key(conn, probe)
+    })
+    |> ignore
+  }
   push(cases, "error: a syntax error is refused and classified", () => {
     case_syntax_error(conn, probe)
   })

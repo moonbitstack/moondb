@@ -45,9 +45,20 @@ test "capability presets follow the dialect" {
 ///|
 test "capability count is the number of flags that are on" {
   let pg = @moondb.Capabilities::for_dialect(@moondb.Dialect::Postgres)
-  assert_eq(pg.count(), 7)
+  assert_eq(pg.count(), 8)
   let lite = @moondb.Capabilities::for_dialect(@moondb.Dialect::Sqlite)
-  assert_eq(lite.count(), 4)
+  assert_eq(lite.count(), 5)
+}
+
+///|
+/// The analytical preset: one statement, one result, nothing to nest.
+test "the ClickHouse preset reports no transactions and no cursors" {
+  let ch = @moondb.Capabilities::for_dialect(@moondb.Dialect::Clickhouse)
+  assert_false(ch.transactions)
+  assert_false(ch.savepoints)
+  assert_false(ch.server_cursors)
+  assert_true(ch.unsigned_integers)
+  assert_eq(ch.dialect.name(), "clickhouse")
 }
 
 ///|

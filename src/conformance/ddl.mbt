@@ -32,6 +32,13 @@ fn create_table(dialect : @moondb.Dialect, table : String) -> String {
       "CREATE TABLE " +
       table +
       " (id INT PRIMARY KEY, n BIGINT NOT NULL, label VARCHAR(64), score DOUBLE, payload BLOB, flag TINYINT(1), missing VARCHAR(64))"
+    // ClickHouse has no key constraints and needs an engine; `Memory` keeps the probe
+    // table out of the merge machinery, which is the cheapest thing a conformance run
+    // can ask of it.
+    Clickhouse =>
+      "CREATE TABLE " +
+      table +
+      " (id Int32, n Int64, label String, score Float64, payload String, flag Bool, missing Nullable(String)) ENGINE = Memory"
   }
 }
 

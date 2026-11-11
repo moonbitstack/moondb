@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 ///|
-/// The three SQL dialects moondb's ratified drivers speak.
+/// The SQL dialects moondb's ratified drivers speak.
 ///
 /// A query layer that has to emit SQL — a builder, a migration runner, an ORM that
 /// paginates or upserts — needs two things from the backend it is talking to: the
@@ -24,6 +24,10 @@ pub(all) enum Dialect {
   Sqlite
   Postgres
   Mysql
+  /// ClickHouse spells its placeholders `?` like SQLite and MySQL, but has no
+  /// transactions, no server-side cursors and its own type names, and a query layer
+  /// that emitted SQL for either of the others would be wrong on it.
+  Clickhouse
 }
 
 ///|
@@ -36,7 +40,7 @@ pub(all) enum Dialect {
 pub fn Dialect::placeholder(self : Dialect, n : Int32) -> String {
   match self {
     Postgres => "$" + n.to_string()
-    Sqlite | Mysql => "?"
+    Sqlite | Mysql | Clickhouse => "?"
   }
 }
 
@@ -48,6 +52,7 @@ pub fn Dialect::name(self : Dialect) -> String {
     Sqlite => "sqlite"
     Postgres => "postgres"
     Mysql => "mysql"
+    Clickhouse => "clickhouse"
   }
 }
 
@@ -61,6 +66,7 @@ pub fn Dialect::parse(name : String) -> Dialect? {
     "sqlite" | "sqlite3" => Some(Sqlite)
     "postgres" | "postgresql" | "pg" => Some(Postgres)
     "mysql" | "mariadb" => Some(Mysql)
+    "clickhouse" | "ch" => Some(Clickhouse)
     _ => None
   }
 }
