@@ -30,7 +30,7 @@ pub fn SqliteDriver::prepare_stmt(
   let named = @moondb.rewrite_named(sql, @moondb.Dialect::Sqlite)
   let st = ffi_prepare(self.handle, @utf8.encode(named.sql))
   if st == 0L {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.handle)))
+    raise_sqlite(self.handle)
   }
   { driver: self, st, text: sql, slots: named.slots, cols: [], closed: false, }
 }
@@ -65,7 +65,7 @@ impl @moondb.Stmt for SqliteStmt with fn execute(self) raise @moondb.DbError {
   // The program has run to completion; reset so the next `execute` starts over.
   ffi_reset(self.st) |> ignore
   if rc != sqlite_done && rc != sqlite_row {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.driver.handle)))
+    raise_sqlite(self.driver.handle)
   }
   {
     rows_affected: ffi_changes(self.driver.handle).to_int64(),
@@ -94,7 +94,7 @@ impl @moondb.Stmt for SqliteStmt with fn query(self) raise @moondb.DbError {
   }
   ffi_reset(self.st) |> ignore
   if term != sqlite_done {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.driver.handle)))
+    raise_sqlite(self.driver.handle)
   }
   rows
 }
@@ -168,9 +168,7 @@ impl @moondb.Cursor for SqliteStmtCursor with fn next(self) raise @moondb.DbErro
     self.done = true
     ffi_reset(self.stmt.st) |> ignore
     if rc != sqlite_done {
-      raise @moondb.QueryError(
-        bytes_to_str(ffi_errmsg(self.stmt.driver.handle)),
-      )
+      raise_sqlite(self.stmt.driver.handle)
     }
     return None
   }

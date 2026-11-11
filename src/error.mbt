@@ -82,7 +82,8 @@ pub(all) struct ServerDetail {
 ///   not exist in the row.
 /// * `Closed`       — the connection or statement was used after `close`.
 /// * `Server`       — the server rejected the statement and reported a SQLSTATE
-///   and/or a numeric error code; see [`ServerDetail`] and [`DbError::kind`].
+///   and/or a numeric error code; see [`ServerDetail`] and [`DbError::kind`]. An
+///   embedded engine reports through this case too, with the numeric code alone.
 ///
 /// Declared `pub(all)` so out-of-tree drivers (moonpostgres, moonmysql, …) that
 /// live in their own packages can *construct and raise* these cases — a plain `pub`

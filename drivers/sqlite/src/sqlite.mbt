@@ -45,7 +45,8 @@ fn SqliteDriver::ensure_open(self : SqliteDriver) -> Unit raise @moondb.DbError 
 ///|
 /// Run a semicolon-separated script (e.g. a schema DDL block) in one call. Unlike
 /// `execute`, this uses SQLite's multi-statement `exec` path and binds no parameters.
-/// Raises `@moondb.QueryError` with SQLite's message on failure.
+/// Raises a `@moondb.Server` error carrying SQLite's message and its result code on
+/// failure; `DbError::kind` gives the class.
 pub fn SqliteDriver::exec_script(
   self : SqliteDriver,
   script : String,
@@ -53,7 +54,7 @@ pub fn SqliteDriver::exec_script(
   self.ensure_open()
   let rc = ffi_exec(self.handle, @utf8.encode(script))
   if rc != 0 {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.handle)))
+    raise_sqlite(self.handle)
   }
 }
 
@@ -67,30 +68,49 @@ fn bytes_to_str(b : Bytes) -> String {
 ///|
 /// Bind each `@moondb.Value` to its 1-based SQLite parameter slot. Every variant maps
 /// to a SQLite storage class out-of-band — nothing is ever spliced into the SQL text.
-fn bind_params(st : Int64, params : Array[@moondb.Value]) -> Unit {
+///
+/// A statement can be given more values than it has slots. SQLite answers the extra bind
+/// with SQLITE_RANGE and carries on, so the driver has to look: silently dropping the
+/// surplus would run the statement with a different set of values than the caller passed.
+fn bind_params(
+  st : Int64,
+  params : Array[@moondb.Value],
+) -> Unit raise @moondb.DbError {
   for i = 0; i < params.length(); i = i + 1 {
     let idx = i + 1
-    match params[i] {
-      @moondb.Null => ffi_bind_null(st, idx) |> ignore
-      @moondb.Bool(v) => ffi_bind_int(st, idx, if v { 1 } else { 0 }) |> ignore
-      @moondb.Int(v) => ffi_bind_int(st, idx, v) |> ignore
-      @moondb.Int64(v) => ffi_bind_int64(st, idx, v) |> ignore
-      @moondb.Double(v) => ffi_bind_double(st, idx, v) |> ignore
-      @moondb.Text(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
-      @moondb.Blob(v) => ffi_bind_blob(st, idx, v) |> ignore
-      @moondb.Time(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
-      @moondb.Numeric(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
-      @moondb.Uuid(v) => ffi_bind_blob(st, idx, v) |> ignore
-      @moondb.Json(v) => ffi_bind_text(st, idx, @utf8.encode(v)) |> ignore
+    let rc = match params[i] {
+      @moondb.Null => ffi_bind_null(st, idx)
+      @moondb.Bool(v) => ffi_bind_int(st, idx, if v { 1 } else { 0 })
+      @moondb.Int(v) => ffi_bind_int(st, idx, v)
+      @moondb.Int64(v) => ffi_bind_int64(st, idx, v)
+      @moondb.Double(v) => ffi_bind_double(st, idx, v)
+      @moondb.Text(v) => ffi_bind_text(st, idx, @utf8.encode(v))
+      @moondb.Blob(v) => ffi_bind_blob(st, idx, v)
+      @moondb.Time(v) => ffi_bind_text(st, idx, @utf8.encode(v))
+      @moondb.Numeric(v) => ffi_bind_text(st, idx, @utf8.encode(v))
+      @moondb.Uuid(v) => ffi_bind_blob(st, idx, v)
+      @moondb.Json(v) => ffi_bind_text(st, idx, @utf8.encode(v))
       @moondb.Array(_) =>
-        ffi_bind_text(st, idx, @utf8.encode(params[i].json_text())) |> ignore
+        ffi_bind_text(st, idx, @utf8.encode(params[i].json_text()))
+    }
+    if rc != sqlite_ok {
+      raise_code(
+        rc,
+        "cannot bind value " +
+        idx.to_string() +
+        " of " +
+        params.length().to_string() +
+        " to a statement with " +
+        ffi_bind_parameter_count(st).to_string() +
+        " placeholder(s)",
+      )
     }
   }
 }
 
 ///|
-/// Prepare + bind, returning the statement handle or raising `QueryError` with
-/// SQLite's message if the prepare failed.
+/// Prepare + bind, returning the statement handle or raising the engine's failure if the
+/// statement would not compile.
 fn SqliteDriver::prepare_bound(
   self : SqliteDriver,
   sql : String,
@@ -99,7 +119,7 @@ fn SqliteDriver::prepare_bound(
   self.ensure_open()
   let st = ffi_prepare(self.handle, @utf8.encode(sql))
   if st == 0L {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.handle)))
+    raise_sqlite(self.handle)
   }
   bind_params(st, params)
   st
@@ -111,7 +131,7 @@ pub impl @moondb.Driver for SqliteDriver with fn execute(self, sql, params) {
   let rc = ffi_step(st)
   ffi_finalize(st) |> ignore
   if rc != sqlite_done && rc != sqlite_row {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.handle)))
+    raise_sqlite(self.handle)
   }
   {
     rows_affected: ffi_changes(self.handle).to_int64(),
@@ -153,7 +173,7 @@ pub impl @moondb.Driver for SqliteDriver with fn query(self, sql, params) {
   // A mid-scan error (SQLITE_ERROR/BUSY/…) must surface, not silently truncate the
   // result the way a bare `break` on any non-row code would.
   if term != sqlite_done {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.handle)))
+    raise_sqlite(self.handle)
   }
   rows
 }
@@ -181,7 +201,7 @@ pub impl @moondb.Cursor for SqliteCursor with fn next(self : SqliteCursor) -> @m
     ffi_finalize(self.st) |> ignore
     self.done = true
     if rc != sqlite_done {
-      raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.driver.handle)))
+      raise_sqlite(self.driver.handle)
     }
     return None
   }
@@ -236,8 +256,8 @@ pub impl @moondb.Driver for SqliteDriver with fn rollback(self) {
 }
 
 ///|
-/// Run a transaction-control keyword through SQLite's `exec` path, raising
-/// `QueryError` with the backend message on failure.
+/// Run a transaction-control keyword through SQLite's `exec` path, raising the engine's
+/// failure — SQLITE_BUSY, SQLITE_ERROR outside a transaction — on rejection.
 fn SqliteDriver::run_txn(
   self : SqliteDriver,
   kw : String,
@@ -245,7 +265,7 @@ fn SqliteDriver::run_txn(
   self.ensure_open()
   let rc = ffi_exec(self.handle, @utf8.encode(kw))
   if rc != 0 {
-    raise @moondb.QueryError(bytes_to_str(ffi_errmsg(self.handle)))
+    raise_sqlite(self.handle)
   }
 }
 

@@ -228,79 +228,56 @@ async fn case_syntax_error(
 ///|
 /// The duplicate-key failure, held to the error model: a constraint violation is
 /// `Integrity`. The wire backends report it as a `Server` error whose SQLSTATE sits in
-/// class 23; SQLite has no SQLSTATE to quote and raises every failure as `QueryError`,
-/// which the model classifies `Database`. The report states that asymmetry rather than
-/// hiding it.
+/// class 23, except the two that quote no SQLSTATE — DuckDB and SQL Server, which classify
+/// the failure themselves. SQLite classifies it from its result code, on the table Python's
+/// `sqlite3` uses, and so lands on the same kind.
 fn expect_integrity_violation(
   e : @moondb.DbError,
   dialect : @moondb.Dialect,
 ) -> Unit raise @moondb.DbError {
-  match dialect {
-    Sqlite =>
-      expect(
-        e.kind() == @moondb.ErrorKind::Database,
-        "a duplicate key raised " + e.to_string(),
-      )
-    // DuckDB classifies the violation itself but has no SQLSTATE to quote: its answer
-    // is `Constraint Error: Duplicate key …`, which is a class of its own.
-    Duckdb | Sqlserver =>
-      expect(
-        e.kind() == @moondb.ErrorKind::Integrity,
-        "a duplicate key was classified " +
-        e.kind().to_string() +
-        ": " +
-        e.to_string(),
-      )
-    _ => {
-      expect(
-        e.kind() == @moondb.ErrorKind::Integrity,
-        "a duplicate key was classified " +
-        e.kind().to_string() +
-        ": " +
-        e.to_string(),
-      )
-      match e.sqlstate() {
-        Some(state) =>
-          expect(
-            state.has_prefix("23"),
-            "SQLSTATE " + state + " is not a constraint violation",
-          )
-        None => expect(false, "the server reported no SQLSTATE")
-      }
+  expect(
+    e.kind() == @moondb.ErrorKind::Integrity,
+    "a duplicate key was classified " +
+    e.kind().to_string() +
+    ": " +
+    e.to_string(),
+  )
+  // A SQLSTATE is reported by the servers that have one; the others are held to the class
+  // alone, because asserting a field they cannot fill would be asserting a wire detail.
+  if dialect == @moondb.Dialect::Postgres || dialect == @moondb.Dialect::Mysql {
+    match e.sqlstate() {
+      Some(state) =>
+        expect(
+          state.has_prefix("23"),
+          "SQLSTATE " + state + " is not a constraint violation",
+        )
+      None => expect(false, "the server reported no SQLSTATE")
     }
   }
 }
 
 ///|
 /// A malformed statement, held to the error model: the SQL itself is wrong, so the class
-/// is `Programming`. SQLite again reports only `QueryError`.
+/// is `Programming`. SQL Server, ClickHouse and DuckDB classify a parser error that way
+/// from their own codes. SQLite's engine reports every malformed statement as
+/// `SQLITE_ERROR`, which Python's `sqlite3` raises as `OperationalError`, so that is what
+/// the driver reports and what this case asserts.
 fn expect_programming_error(
   e : @moondb.DbError,
   dialect : @moondb.Dialect,
 ) -> Unit raise @moondb.DbError {
-  match dialect {
-    Sqlite =>
-      expect(
-        e.kind() == @moondb.ErrorKind::Database,
-        "a malformed statement raised " + e.to_string(),
-      )
-    // ClickHouse reports a parser error as a `Server` error with its own code, which
-    // the driver maps onto `Programming`; there is no SQLSTATE to quote.
-    Clickhouse | Duckdb | Sqlserver =>
-      expect(
-        e.kind() == @moondb.ErrorKind::Programming,
-        "a malformed statement was classified " +
-        e.kind().to_string() +
-        ": " +
-        e.to_string(),
-      )
-    _ =>
-      expect(
-        e.kind() == @moondb.ErrorKind::Programming,
-        "a malformed statement was classified " +
-        e.kind().to_string() +
-        ": " +
-        e.to_string(),
-      )
+  let want = if dialect == @moondb.Dialect::Sqlite {
+    @moondb.ErrorKind::Operational
+  } else {
+    @moondb.ErrorKind::Programming
   }
+  expect(
+    e.kind() == want,
+    "a malformed statement was classified " +
+    e.kind().to_string() +
+    ", not " +
+    want.to_string() +
+    ": " +
+    e.to_string(),
+  )
 }

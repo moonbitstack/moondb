@@ -233,14 +233,16 @@ test "sqlite matrix: window ROW_NUMBER partitions and ranks rows" {
 }
 
 ///|
+/// Run `f` and name what it raised: the class of a `DbError`, or "closed" for a handle
+/// that was used after `close`. The class is what the model says a caller may branch on,
+/// so the matrix asserts that rather than which error case the driver chose.
 fn sqlite_error_kind(f : () -> Unit raise @moondb.DbError) -> String {
   try {
     f()
     "no-error"
   } catch {
-    @moondb.QueryError(_) => "query"
     @moondb.Closed => "closed"
-    _ => "other"
+    e => e.kind().to_string()
   }
 }
 
@@ -249,19 +251,20 @@ test "sqlite matrix: the error surface — syntax, constraint, use-after-close" 
   let db = open_matrix()
   db.execute("CREATE TABLE u (id INTEGER PRIMARY KEY, name TEXT UNIQUE)", [])
   |> ignore
-  // A malformed statement is a QueryError carrying SQLite's message.
+  // A malformed statement is SQLITE_ERROR, which Python's sqlite3 raises as an
+  // OperationalError; the driver follows that table.
   assert_eq(
     sqlite_error_kind(() => db.query("SELCT nope FROM u", []) |> ignore),
-    "query",
+    "operational",
   )
-  // A UNIQUE violation on the second insert surfaces as a QueryError.
+  // A UNIQUE violation is SQLITE_CONSTRAINT_UNIQUE: an integrity failure.
   db.execute("INSERT INTO u (name) VALUES (?)", [@moondb.Text("dup")]) |> ignore
   assert_eq(
     sqlite_error_kind(() => {
       db.execute("INSERT INTO u (name) VALUES (?)", [@moondb.Text("dup")])
       |> ignore
     }),
-    "query",
+    "integrity",
   )
   // After close, every statement is a clean Closed, never a dangling-pointer call.
   db.close()

@@ -133,19 +133,24 @@ test "sqlite: exec_script runs a multi-statement schema in one call" {
 }
 
 ///|
-test "sqlite: a bad statement surfaces SQLite's message as QueryError" {
+test "sqlite: a bad statement carries SQLite's message and its result code" {
   let db = open_mem()
-  // The no-such-table error must propagate as a moondb QueryError, not be swallowed.
+  // The no-such-table error must propagate as a moondb Server error, not be swallowed,
+  // and it must carry the engine's own code beside the message.
   let caught = try {
     db.query("SELECT * FROM does_not_exist", []) |> ignore
     None
   } catch {
-    @moondb.QueryError(m) => Some(m)
+    @moondb.Server(detail) => Some(detail)
     other => raise other
   }
   match caught {
-    Some(m) => assert_eq(m.contains("does_not_exist"), true)
-    None => abort("expected a QueryError for a missing table")
+    Some(detail) => {
+      assert_eq(detail.message.contains("does_not_exist"), true)
+      assert_eq(detail.code, Some(1)) // SQLITE_ERROR
+      assert_eq(detail.kind, @moondb.ErrorKind::Operational)
+    }
+    None => abort("expected a Server error for a missing table")
   }
   db.close()
 }

@@ -14,3 +14,8 @@ import {
 options(
   "native-stub": [ "sqlite/stub.c", "sqlite/sqlite3.c" ],
 )
+
+import {
+  "moonbitlang/async",
+  "moonbitstack/moondb/conformance",
+} for "test"

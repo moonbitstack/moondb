@@ -25,6 +25,12 @@ moonbit_bytes_t orm_errmsg(int64_t db) {
   const char* m = sqlite3_errmsg((sqlite3*)(intptr_t)db);
   return mb_bytes(m, m ? (int32_t)strlen(m) : 0);
 }
+/* The extended code names the failure precisely — SQLITE_CONSTRAINT_UNIQUE rather than
+   plain SQLITE_CONSTRAINT — so the driver classifies on the primary code and reports the
+   extended one. */
+int32_t orm_extended_errcode(int64_t db) {
+  return sqlite3_extended_errcode((sqlite3*)(intptr_t)db);
+}
 int32_t orm_exec(int64_t db, moonbit_bytes_t sql) {
   char* s = mb_cstr(sql);
   int rc = sqlite3_exec((sqlite3*)(intptr_t)db, s, NULL, NULL, NULL);

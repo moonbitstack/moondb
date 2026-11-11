@@ -104,12 +104,13 @@ test "sqlite: the driver reports its dialect and capabilities" {
 ///|
 test "sqlite: a syntax error is reported at prepare time" {
   let db = open_stmt_db()
-  let err = try {
+  // The statement never compiles, so the failure arrives from `prepare` rather than from
+  // `execute` — classified, as every SQLite failure now is, from the engine's result code.
+  let kind = try {
     db.prepare("SELECT FROM WHERE") |> ignore
-    ""
+    "no error"
   } catch {
-    @moondb.QueryError(_) => "query error"
-    _ => "wrong error"
+    e => e.kind().to_string()
   }
-  assert_eq(err, "query error")
+  assert_eq(kind, "operational")
 }

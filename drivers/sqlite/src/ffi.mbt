@@ -13,6 +13,9 @@ extern "c" fn ffi_open(path : Bytes) -> Int64 = "orm_open"
 extern "c" fn ffi_errmsg(db : Int64) -> Bytes = "orm_errmsg"
 
 ///|
+extern "c" fn ffi_extended_errcode(db : Int64) -> Int32 = "orm_extended_errcode"
+
+///|
 #borrow(sql)
 extern "c" fn ffi_exec(db : Int64, sql : Bytes) -> Int32 = "orm_exec"
 
@@ -74,6 +77,9 @@ extern "c" fn ffi_reset(st : Int64) -> Int32 = "orm_reset"
 extern "c" fn ffi_clear_bindings(st : Int64) -> Int32 = "orm_clear_bindings"
 
 ///|
+extern "c" fn ffi_bind_parameter_count(st : Int64) -> Int32 = "orm_bind_parameter_count"
+
+///|
 extern "c" fn ffi_changes(db : Int64) -> Int32 = "orm_changes"
 
 ///|
@@ -84,6 +90,9 @@ extern "c" fn ffi_close(db : Int64) -> Int32 = "orm_close"
 
 ///|
 /// SQLite `sqlite3_step` return codes we distinguish.
+let sqlite_ok : Int32 = 0
+
+///|
 let sqlite_row : Int32 = 100
 
 ///|
