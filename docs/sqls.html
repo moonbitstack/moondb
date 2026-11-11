@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moondb — moonsqls</title>
+  <meta name="description" content="moonsqls: the SQL Server implementation of the moondb AsyncDriver contract.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/moonphase.css">
+  <script type="module" src="assets/js/scrollbar.js"></script>
+  <script>try{var t=localStorage.getItem("moondb-theme");if(!t){t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html" style="border:0">
+      <svg class="glyph" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <circle cx="15" cy="16" r="10" fill="currentColor"/>
+        <circle cx="21" cy="16" r="9" fill="var(--paper)"/>
+      </svg>
+      moondb
+    </a>
+    <nav class="nav">
+      <a href="index.html">Home</a>
+      <a href="guide.html">Guide</a>
+      <a href="api.html">API</a>
+      <a href="https://github.com/moonbitstack/moondb" rel="noopener">GitHub</a>
+    </nav>
+    <div class="theme-toggle" id="theme-toggle" role="group" aria-label="Colour theme"><button type="button" data-set-theme="light">Light</button><button type="button" data-set-theme="dark">Dark</button></div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div class="moon" data-moon="0.75,false" style="width:64px;height:64px;margin-bottom:var(--s3)"></div>
+      <p class="folio">waxing gibbous · a statute of moondb</p>
+      <h1>moonsqls</h1>
+      <p class="lede">The SQL Server implementation of the <b>AsyncDriver</b> contract — TDS spoken directly, statements the server compiles once, rows that travel in the protocol's own load format.</p>
+    </section>
+
+    <section class="section">
+      <p class="folio">Enactment</p>
+      <h2>What it is</h2>
+      <p class="muted">moonsqls connects to a SQL Server instance and implements <code class="inline">AsyncDriver</code> over TDS: prelogin, login7, the token stream. The password never crosses the wire in the clear — encryption is negotiated before the login, and the handshake runs inside prelogin packets, after which whole TDS packets are the plaintext inside TLS.</p>
+      <div class="article"><div class="num">i</div><div class="body"><h3>Install</h3><p class="muted"><code class="inline">moon add moonbitstack/moonsqls</code></p></div></div>
+      <div class="article"><div class="num">ii</div><div class="body"><h3>Binding</h3><p class="muted">A statement is written with <code class="inline">?</code>. The driver rewrites each one into <code class="inline">@p1</code>, <code class="inline">@p2</code> and sends the values as named RPC parameters to <code class="inline">sp_executesql</code> — beside the statement, never inside it.</p></div></div>
+      <div class="article"><div class="num">iii</div><div class="body"><h3>Prepared statements</h3><p class="muted"><code class="inline">prepare</code> compiles the text with <code class="inline">sp_prepare</code>, whose handle comes back in an <code class="inline">OUTPUT</code> parameter; every run after that is an <code class="inline">sp_execute</code> carrying the handle and the values, so the statement text does not travel again. <code class="inline">close</code> releases the plan with <code class="inline">sp_unprepare</code>.</p></div></div>
+      <div class="article"><div class="num">iv</div><div class="body"><h3>Bulk copy</h3><p class="muted"><code class="inline">bulk_copy</code> arms the table with <code class="inline">INSERT BULK</code> and then sends one message of column metadata and row tokens, so a thousand rows cost one round trip. Column types are inferred from the values and declared wider than the destination, so the server converts and no row overflows a width an earlier row chose.</p></div></div>
+      <div class="article"><div class="num">v</div><div class="body"><h3>TDS 8.0</h3><p class="muted"><code class="inline">connect(strict=true)</code> starts TLS before the first TDS byte and announces version 8.0 over the ALPN protocol <code class="inline">tds/8.0</code>: there is no clear-text prelogin to downgrade, and a server that cannot do it fails the handshake rather than falling back.</p></div></div>
+      <div class="article"><div class="num">vi</div><div class="body"><h3>Coverage</h3><p class="muted"><span class="dot green"></span>execute <span class="dot green"></span>query <span class="dot green"></span>cursor <span class="dot green"></span>transactions <span class="dot green"></span>savepoints <span class="dot green"></span>prepared handles <span class="dot green"></span>bulk copy <span class="dot green"></span>TLS and TDS 8.0 <span class="dot green"></span>error classification <span class="dot gray"></span>MARS (declined).</p></div></div>
+    </section>
+
+    <div class="statusbar">
+      <span><b>moonsqls</b></span>
+      <span>implements <b>AsyncDriver</b></span>
+      <span>placeholder <b>?</b> → <b>@p1</b></span>
+      <span>interface TDS 7.4 / 8.0</span>
+    </div>
+
+    <div class="cta">
+      <a class="btn primary" href="index.html#drivers">See the family</a>
+      <a class="btn" href="api.html">The contract it obeys</a>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span>moondb · Apache-2.0 · the MoonBit database contract</span>
+    <span><a href="https://github.com/moonbitstack/moondb" rel="noopener">github.com/moonbitstack/moondb</a></span><span class="cross">the query layer: <a href="https://moonbitstack.github.io/moonorm/" rel="noopener">moonorm</a></span>
+  </footer>
+
+  <script src="assets/js/moonphase.js"></script>
+  <script src="assets/js/theme.js"></script>
+</body>
+</html>

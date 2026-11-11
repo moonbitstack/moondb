@@ -26,11 +26,11 @@ async fn run() -> Unit raise {
 ```
 prelogin  → encryption negotiated in the same packet as the login
     ↓         TLS handshake carried inside prelogin packets
-login7    → credentials, the database, and the TDS 7.4 extension block
-    ↓
+login7    → credentials, the database, and the 7.4 extension block,
+    ↓         or TDS 8.0 with TLS already under the whole session
 batch/RPC → one TDS packet per message, wrapped in TLS once it is on
     ↓
-tokens    → COLMETADATA, ROW, NBCROW, DONE, ERROR, ENVCHANGE
+tokens    → COLMETADATA, ROW, NBCROW, DONE, ERROR, ENVCHANGE, RETURNVALUE
 ```
 
 Three details are what make TDS awkward, and all three are in this driver:
@@ -45,6 +45,46 @@ Three details are what make TDS awkward, and all three are in this driver:
 - **Parameters travel through `sp_executesql`, by name.** `?` becomes `@p1`, the values go
   as named RPC parameters beside the statement, and the statement's own two parameters are
   `@statement` and `@params`.
+- **A message may not be sealed into one TLS record.** The server reads a record at a
+  time, so two TDS packets in one record leave it waiting for the rest of the first and it
+  closes the connection without a message. Each packet is sealed and sent on its own.
+
+## Prepared statements
+
+`prepare` compiles the text with `sp_prepare` and every run after that is an `sp_execute`
+carrying only the handle and the values — the statement text does not travel again.
+`close` releases the handle with `sp_unprepare`.
+
+`sp_prepare` is told the type of every parameter, and the types come from the values, so a
+statement with placeholders compiles at its first `bind` and one without compiles at
+`prepare`, where a syntax error belongs. A `bind` whose values declare different types
+drops the stale handle and compiles again rather than sending values the plan did not
+expect. `capabilities().prepared_statements` is `true`.
+
+## Bulk copy
+
+```moonbit nocheck
+let copied = conn.bulk_copy("hero", ["id", "name"], [
+  [@moondb.Int(1), @moondb.Text("Nova")],
+  [@moondb.Int(2), @moondb.Text("Ivan")],
+])
+```
+
+The table is armed with `INSERT BULK`, which declares the shape of the stream, and then one
+message carries the column metadata and every row. Column types are inferred from the first
+value in each column and declared wider than any destination column — `bigint` for an
+integer, `nvarchar(max)` for a string, `varbinary(max)` for bytes — so a later row cannot
+overflow a width an earlier one chose; the server converts into the real column types. A
+`NULL` travels as the type's own null, and a value of any size travels as a `PLP` run.
+
+## TDS 8.0
+
+`SqlServerConn::connect(..., strict=true)` starts TLS before the first TDS byte, so
+prelogin and the login inside it are encrypted whatever the server would have offered, and
+announces itself as version 8.0 over the ALPN protocol `tds/8.0`. `strict_tls()` is the
+configuration that carries the protocol name; a caller who passes their own `tls` for a
+strict connection has to name it themselves. A server older than SQL Server 2022 fails the
+handshake, which is the point of asking for it.
 
 ## Type mapping
 
@@ -82,22 +122,23 @@ a malformed statement — **12 of 12, no skips**. The savepoint case uses T-SQL'
 (`SAVE TRANSACTION` / `ROLLBACK TRANSACTION`), which is a dialect difference the matrix
 carries rather than a capability the server lacks.
 
-Alongside it, six offline tests pin the bytes: the prelogin option table, the login's
-length field and password obfuscation, the extension block a 7.4 login must have, the
-`?`-rewriting that skips literals and comments, and the token stream's metadata/row/error
-shapes.
+Alongside it, nine offline tests pin the bytes: the prelogin option table, the login's
+length field and password obfuscation, the extension block a 7.4 login must have, the 8.0
+version field a strict login carries, the `?`-rewriting that skips literals and comments,
+the token stream's metadata/row/error shapes, the `RETURNVALUE` a prepared handle arrives
+in, and the metadata and cell layout of a bulk stream. And four live tests cover what only
+a server can answer: the handle `sp_prepare` assigns, bulk copy of 201 rows across six
+types, a parameter of twenty kilobytes, and a response of two thousand rows.
 
 ## Not covered
 
-- **TDS 8.0 strict encryption.** SQL Server 2022's `sqlcmd -N s` style connection wraps
-  the whole stream in TLS from the first byte; this driver speaks 7.4, which is what
-  drivers and servers have negotiated for a decade.
 - **`MARS`** (multiple active result sets) — the option is declined in prelogin, so one
   statement at a time per connection.
-- **Bulk copy** (`INSERT BULK`), `XML` columns and spatial types.
-- **`sp_prepare` / `sp_execute`.** A prepared handle here re-sends the statement through
-  `sp_executesql`; the values still travel out of band. `capabilities().prepared_statements`
-  is therefore `false`, which is the honest answer.
+- **`XML` columns and spatial types.** They raise `NotSupported` rather than reading back
+  as something they are not.
+- **`DECIMAL` in a bulk stream.** A bulk column is written as one of the types the driver
+  infers from the values; a `decimal` destination converts from the `nvarchar(max)` an
+  exact numeric travels as, which is correct but not the narrowest form.
 - **Integrated (Windows) authentication.** SQL authentication only.
 
 ## The TLS dependency is local, for now

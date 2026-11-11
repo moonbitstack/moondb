@@ -317,23 +317,26 @@ assert_eq(report.failures(), [])
 
 ## What each driver supports
 
-| | SQLite | PostgreSQL | MySQL | ClickHouse |
-|---|:--:|:--:|:--:|:--:|
-| Prepared `Stmt` | yes | yes, with a statement cache | yes | no, the HTTP interface re-sends |
-| Named parameters | yes | yes | yes | yes, rewritten to `{pN:Type}` |
-| Server-side cursor | no | yes, `DECLARE`/`FETCH` in batches | no | no |
-| Streaming `COPY` | no | yes, both directions | no | no |
-| Transactions | yes | yes | yes | no |
-| Savepoints | yes | yes | yes | no |
-| Multiple result sets | no | yes | yes | no |
-| Unsigned 64-bit | no | no | yes | yes |
-| `RETURNING` | yes | yes | no | no |
-| Binary result format | — | opt-in, per column | prepared statements | always, `RowBinary` |
-| Long parameters (streamed) | — | — | yes, past 1 MiB | — |
+| | SQLite | PostgreSQL | MySQL | ClickHouse | SQL Server | DuckDB |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| Prepared `Stmt` | yes | yes, with a statement cache | yes | no, the HTTP interface re-sends | yes, `sp_prepare` | yes |
+| Named parameters | yes | yes | yes | yes, rewritten to `{pN:Type}` | yes | yes |
+| Server-side cursor | no | yes, `DECLARE`/`FETCH` in batches | no | no | no | no |
+| Streaming `COPY` | no | yes, both directions | no | no | no | no |
+| Transactions | yes | yes | yes | no | yes | yes |
+| Savepoints | yes | yes | yes | no | yes | no |
+| Multiple result sets | no | yes | yes | no | yes | no |
+| Unsigned 64-bit | no | no | yes | yes | no | yes |
+| `RETURNING` | yes | yes | no | no | `OUTPUT` | yes |
+| Binary result format | — | opt-in, per column | prepared statements | always, `RowBinary` | — | — |
+| Long parameters (streamed) | — | — | yes, past 1 MiB | — | `PLP`, any size | — |
+| Bulk copy | — | — | — | — | `INSERT BULK` | — |
 
 Two servers get a package of their own rather than a paragraph: `moonckdb` (CockroachDB) and `moontidb` (TiDB) sit on the driver that already speaks their wire protocol and add the two things the bytes cannot say — `server_of(conn)`, which asks `SELECT version()` and names the server, and `capabilities_for(server)`, which clears the flags that server does not honour (`notifications` for CockroachDB, `multiple_result_sets` for TiDB). Their CI runs the same conformance matrix through their own `connect`.
 
-`moonsqls` speaks Microsoft's TDS 7.4 in pure MoonBit — prelogin, login7, the token stream — with TLS through `moontls`. Parameters bind through an RPC to `sp_executesql`, the transaction descriptor the server hands out on `BEGIN` is carried on every later request, and the session sets `ANSI_NULL_DFLT_ON` so a column declared without `NULL`/`NOT NULL` comes out nullable.
+`moonsqls` speaks Microsoft's TDS in pure MoonBit — prelogin, login7, the token stream — with TLS through `moontls`. Parameters bind through an RPC to `sp_executesql`, and a statement prepared once binds through `sp_prepare`/`sp_execute` instead, so the text does not travel again; `sp_unprepare` releases the handle when the statement closes. `bulk_copy` sends rows in the protocol's own load format — `INSERT BULK` declares the shape, then one message carries every row — so a thousand rows cost one round trip. TDS 8.0 is `connect(strict=true)`: TLS starts before the first TDS byte and the login announces version 8.0 over the ALPN protocol `tds/8.0`, which leaves nothing for a downgrade to negotiate. The transaction descriptor the server hands out on `BEGIN` is carried on every later request, and the session sets `ANSI_NULL_DFLT_ON` so a column declared without `NULL`/`NOT NULL` comes out nullable.
+
+`moonsqlite` reports a failure the way the engine does: the result code SQLite records for the last call, classified on the same table Python's `sqlite3` module uses for its exceptions. A unique, foreign-key, not-null or check violation is `Integrity`; a malformed statement is `Operational`, which is what Python raises for one; a value bound to a slot the statement does not have is `Interface`. The extended code travels in `ServerDetail.code`, so `2067` (`UNIQUE`) and `1299` (`NOT NULL`) are distinguishable without parsing a message.
 
 `moonduckdb` is the embedded analytical counterpart to moonsqlite: the same `Driver` contract, a `Duckdb` dialect of its own, real transactions and no savepoints, and an engine loaded at run time instead of compiled — `drivers/duckdb/scripts/fetch_engine.sh` gets the pinned release, and a checkout without it still builds, with the DuckDB tests stepping aside.
 

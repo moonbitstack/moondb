@@ -68,6 +68,32 @@ The query builder is dialect-neutral and pure; this driver adapts it to SQLite's
 wire. Because moonorm and moonsqlite both speak `@moondb`, swapping SQLite for
 another backend is a one-line change at `Session::new`.
 
+## Failures are classified from the engine's result code
+
+SQLite reports a result code for every failed call and says nothing else — no SQLSTATE, no
+severity. The driver reads `sqlite3_extended_errcode` and classifies it on the table
+Python's `sqlite3` module uses for its exception classes, so code written against one reads
+the same against the other:
+
+| SQLite | `ErrorKind` | Python |
+|---|---|---|
+| `SQLITE_CONSTRAINT`, `SQLITE_MISMATCH` | `Integrity` | `IntegrityError` |
+| `SQLITE_ERROR`, `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_READONLY`, `SQLITE_IOERR`, … | `Operational` | `OperationalError` |
+| `SQLITE_MISUSE`, `SQLITE_RANGE` | `Interface` | `InterfaceError` |
+| `SQLITE_TOOBIG` | `Data` | `DataError` |
+| `SQLITE_CORRUPT`, `SQLITE_AUTH`, `SQLITE_NOTADB` | `Database` | `DatabaseError` |
+| `SQLITE_INTERNAL`, `SQLITE_NOTFOUND`, `SQLITE_NOMEM` | `Internal` | `InternalError` |
+
+A syntax error is `Operational`, not `Programming`: that is what Python raises for one, and
+the point of the table is that both clients of the same engine branch alike. The extended
+code travels beside the class in `ServerDetail.code`, so `2067` (`UNIQUE`) and `1299`
+(`NOT NULL`) are distinguishable without parsing a message.
+
+A statement handed more values than it has placeholders is a failure too — SQLite answers
+the surplus bind with `SQLITE_RANGE` and runs the statement anyway, which the driver now
+refuses with an `Interface` failure rather than running something other than what was
+asked.
+
 ## Design and boundaries
 
 - **Isolated C.** The amalgamation and a thin FFI stub (`sqlite/stub.c`) live in

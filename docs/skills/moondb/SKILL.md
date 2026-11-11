@@ -257,6 +257,32 @@ prelogin, runs the handshake through `moontls`, and binds `?` parameters through
 the whole TDS packet once it is on, and a transaction's descriptor has to be repeated on
 every request inside it — both handled for you, but worth knowing when reading a trace.
 
+Three of its calls are its own, beyond the contract:
+
+<!-- nocheck -->
+```moonbit
+// A statement prepared once compiles on the server; later runs send only the handle and
+// the values. `capabilities().prepared_statements` is true.
+let stmt = conn.prepare("INSERT INTO hero (id, name) VALUES (?, ?)")
+stmt.bind([@moondb.Int(1), @moondb.Text("Nova")])
+stmt.execute() |> ignore
+stmt.close()  // releases the server-side plan
+
+// Rows travel in TDS's bulk-load format: one round trip for the whole batch.
+let copied = conn.bulk_copy("hero", ["id", "name"], [
+  [@moondb.Int(2), @moondb.Text("Ivan")],
+])
+
+// TDS 8.0: TLS starts before the first TDS byte and the login announces version 8.0.
+let strict = @moonsqls.SqlServerConn::connect(
+  "db.internal", 1433, "sa", password, "app", strict=true,
+)
+```
+
+`bulk_copy` infers each column's type from the first value in it and declares it wider than
+the destination — `bigint` for an integer, `nvarchar(max)` for a string — so the server
+converts and a later row cannot overflow a width an earlier one chose.
+
 `moonduckdb` is the embedded analytical engine: `Driver`, a `Duckdb` dialect, real
 transactions, no savepoints, and the engine loaded at run time — `MOONDUCKDB_LIBRARY`
 points at `libduckdb.so` or `duckdb.dll`, and `drivers/duckdb/scripts/fetch_engine.sh`
@@ -278,3 +304,9 @@ fetches the pinned release.
   PostgreSQL; on MySQL a `FLOAT` column is the one type whose two protocols differ,
   because the text protocol renders six significant digits. Read `FLOAT` through a
   prepared statement when the exact 32-bit value matters.
+- SQLite has no SQLSTATE: its failures are classified from the engine's result code on the
+  table Python's `sqlite3` uses. A constraint violation is `Integrity`; a syntax error is
+  `Operational`, not `Programming` — that is what Python raises, and matching it is the
+  point. Branch on `kind()`, not on which error case the driver chose.
+- A statement handed more values than it has placeholders raises. SQLite would otherwise
+  bind what it can and run the statement with fewer values than were passed.
