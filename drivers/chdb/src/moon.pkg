@@ -1,4 +1,4 @@
-// moonclickhouse: a ClickHouse driver over the server's HTTP interface. The wire is
+// moonchdb: a ClickHouse driver over the server's HTTP interface. The wire is
 // HTTP/1.1 with the query in the body and the parameters in the URL, the result is
 // `RowBinaryWithNamesAndTypes` (exact, no text formatting in between), and the
 // connection is stateless — every statement is one request on its own socket.

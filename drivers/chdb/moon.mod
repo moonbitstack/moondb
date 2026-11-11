@@ -1,4 +1,4 @@
-name = "moonbitstack/moonclickhouse"
+name = "moonbitstack/moonchdb"
 
 version = "0.1.0"
 

@@ -53,6 +53,14 @@
       <div class="article"><div class="num">vii</div><div class="body"><h3>Coverage</h3><p class="muted"><span class="dot green"></span>execute <span class="dot green"></span>query <span class="dot green"></span>transaction <span class="dot green"></span>close <span class="dot green"></span>query_stream (live) <span class="dot green"></span>prepare <span class="dot green"></span>dialect <span class="dot green"></span>LISTEN/NOTIFY <span class="dot green"></span>CancelRequest <span class="dot green"></span>binary results <span class="dot gray"></span>ping (default).</p></div></div>
     </section>
 
+    <section class="section">
+      <p class="folio">Addition</p>
+      <h2>Servers that speak this protocol</h2>
+      <p class="muted">PostgreSQL is not the only server that answers its wire protocol, and the driver needs no change to reach one: the startup handshake, the extended query protocol, the binary formats and the error mapping are what the protocol defines, not what one vendor defines. What differs is the SQL on top, and that is written down rather than discovered mid-statement.</p>
+      <div class="article"><div class="num">i</div><div class="body"><h3>openGauss 7.0</h3><p class="muted">Verified against a real server, in CI, with the shared conformance matrix: <b>12 of 12</b>. Logins work under <code class="inline">password_encryption_type = 0</code> (MD5); the default SHA-256 and SM3 exchanges are not implemented by this driver, and the server refuses the connection. Its SQL has gaps a caller has to plan around: no <code class="inline">ON CONFLICT … DO UPDATE</code>, no <code class="inline">DOMAIN</code>, no <code class="inline">LISTEN</code>, an empty string stored as <code class="inline">NULL</code>, and <code class="inline">BackendKeyData</code>'s pid that is not <code class="inline">pg_backend_pid()</code>. <code class="inline">capabilities()</code> still describes the driver, so read <code class="inline">notifications</code> as "implemented here", not "served there".</p></div></div>
+      <div class="article"><div class="num">ii</div><div class="body"><h3>CockroachDB v24.3</h3><p class="muted">Same protocol, same twelve cases passing. No <code class="inline">LISTEN</code>/<code class="inline">NOTIFY</code> and no <code class="inline">DROP TYPE … CASCADE</code>; cursors, <code class="inline">COPY</code>, savepoints and <code class="inline">RETURNING</code> all work. <a href="https://github.com/moonbitstack/moondb/tree/master/drivers/ckdb" rel="noopener">moonckdb</a> is the package that names the server (<code class="inline">server_of</code>) and reports <code class="inline">notifications: false</code> for it, so a subscriber polls instead of failing.</p></div></div>
+    </section>
+
     <div class="statusbar">
       <span><b>moonpostgres</b></span>
       <span>implements <b>Driver</b></span>

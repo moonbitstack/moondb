@@ -1,4 +1,4 @@
-# moonclickhouse
+# moonchdb
 
 A **pure-MoonBit ClickHouse driver** — the server's HTTP interface spoken directly, with
 **zero C** and no client library. `ClickHouseConn` implements the
@@ -7,7 +7,7 @@ moondb-based stack can sit on top of an analytical engine the same way it sits o
 PostgreSQL or SQLite.
 
 ```
-moon add moonbitstack/moonclickhouse
+moon add moonbitstack/moonchdb
 ```
 
 Supports native and wasm hosts with TCP socket bindings. The interface is stateless:
@@ -18,7 +18,7 @@ tasks without a lock.
 
 ```moonbit
 async fn run() -> Unit raise {
-  let db = @moonclickhouse.ClickHouseConn::connect(
+  let db = @moonchdb.ClickHouseConn::connect(
     "127.0.0.1", user="default", database="default",
   )
   db.execute(

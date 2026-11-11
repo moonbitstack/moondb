@@ -8,7 +8,7 @@ description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or M
 `moonbitstack/moondb` is the interface layer between MoonBit query code and a
 database driver. It defines `Value`, `Row`, `Driver`, `AsyncDriver`, `Stmt`,
 `Txn`, `Dialect` and `Capabilities`; the drivers (`moonsqlite`,
-`moonpostgres`, `moonmysql`, `moonclickhouse`) implement them. Code written
+`moonpostgres`, `moonmysql`, `moonchdb`) implement them. Code written
 against `Driver` runs on all of them.
 
 ## Install and import
@@ -211,7 +211,7 @@ comes back cleaner than expected.
 
 ## ClickHouse, and why it answers differently
 
-`moonclickhouse` speaks the server's HTTP interface: one statement per request, the
+`moonchdb` speaks the server's HTTP interface: one statement per request, the
 query in the body, the values beside it. It is an `AsyncDriver` like the wire drivers,
 and it reports what the engine cannot do through `capabilities` — so check before you
 rely on it.

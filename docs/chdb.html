@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>moondb — moonclickhouse</title>
-  <meta name="description" content="moonclickhouse: the ClickHouse implementation of the moondb AsyncDriver contract.">
+  <title>moondb — moonchdb</title>
+  <meta name="description" content="moonchdb: the ClickHouse implementation of the moondb AsyncDriver contract.">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -36,15 +36,15 @@
     <section class="hero">
       <div class="moon" data-moon="0.55,false" style="width:64px;height:64px;margin-bottom:var(--s3)"></div>
       <p class="folio">waning crescent · a statute of moondb</p>
-      <h1>moonclickhouse</h1>
+      <h1>moonchdb</h1>
       <p class="lede">The ClickHouse implementation of the <b>AsyncDriver</b> contract — the HTTP interface, <code class="inline">RowBinary</code> results read in their own bytes, and parameters the server substitutes.</p>
     </section>
 
     <section class="section">
       <p class="folio">Enactment</p>
       <h2>What it is</h2>
-      <p class="muted">moonclickhouse connects to a ClickHouse server over its HTTP interface and implements <code class="inline">AsyncDriver</code> against it. One statement is one request: the query is the body, the bound values travel beside it as URL parameters, and the answer comes back as <code class="inline">RowBinaryWithNamesAndTypes</code>.</p>
-      <div class="article"><div class="num">i</div><div class="body"><h3>Install</h3><p class="muted"><code class="inline">moon add moonbitstack/moonclickhouse</code></p></div></div>
+      <p class="muted">moonchdb connects to a ClickHouse server over its HTTP interface and implements <code class="inline">AsyncDriver</code> against it. One statement is one request: the query is the body, the bound values travel beside it as URL parameters, and the answer comes back as <code class="inline">RowBinaryWithNamesAndTypes</code>.</p>
+      <div class="article"><div class="num">i</div><div class="body"><h3>Install</h3><p class="muted"><code class="inline">moon add moonbitstack/moonchdb</code></p></div></div>
       <div class="article"><div class="num">ii</div><div class="body"><h3>Placeholder</h3><p class="muted">A statement is written with <code class="inline">?</code>; the driver rewrites each one into the server's <code class="inline">{p1:Int32}</code> syntax, choosing the type from the bound <code class="inline">Value</code>, and passes the value as <code class="inline">param_p1</code>. Nothing is spliced into the SQL text, so a literal, an identifier and a comment are left alone.</p></div></div>
       <div class="article"><div class="num">iii</div><div class="body"><h3>Results</h3><p class="muted">The format is binary, not text: a column count, the names, the type strings, then one row after another. A 64-bit integer, a decimal and a byte string keep their exact value; a <code class="inline">String</code> column reads back as <code class="inline">Text</code> when its bytes are UTF-8 and as <code class="inline">Blob</code> when they are not.</p></div></div>
       <div class="article"><div class="num">iv</div><div class="body"><h3>What an analytical engine lacks</h3><p class="muted">No transactions, no savepoints, no server-side cursor, no prepared statements and no unique constraints. The driver reports that through <code class="inline">capabilities</code> — <code class="inline">transactions</code> is false — so a query layer lowers its plan instead of discovering it mid-statement.</p></div></div>
@@ -52,7 +52,7 @@
     </section>
 
     <div class="statusbar">
-      <span><b>moonclickhouse</b></span>
+      <span><b>moonchdb</b></span>
       <span>implements <b>AsyncDriver</b></span>
       <span>placeholder <b>?</b> → <b>{p1:Type}</b></span>
       <span>interface HTTP</span>

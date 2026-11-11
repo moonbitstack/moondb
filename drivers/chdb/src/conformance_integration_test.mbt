@@ -21,7 +21,7 @@ async test "conformance: real ClickHouse honours the driver contract" {
   let port = @string.parse_int(env_or("CLICKHOUSE_PORT", "8123")) catch {
     _ => 8123
   }
-  let conn = @moonclickhouse.ClickHouseConn::connect(
+  let conn = @moonchdb.ClickHouseConn::connect(
     env_or("CLICKHOUSE_HOST", "127.0.0.1"),
     port~,
     user=env_or("CLICKHOUSE_USER", "default"),

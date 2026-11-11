@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "moonbitstack/moonclickhouse"
+package "moonbitstack/moonchdb"
 
 import {
   "moonbitstack/moondb",
