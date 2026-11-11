@@ -729,16 +729,26 @@ jobs:
 
       - name: wait for openGauss
         run: |
+          gsql() {
+            docker exec -e GAUSSHOME=/usr/local/opengauss \
+              -e LD_LIBRARY_PATH=/usr/local/opengauss/lib \
+              -u omm gauss /usr/local/opengauss/bin/gsql -d postgres -p 5432 "$@"
+          }
           # The server answers SQL only once it has finished initialising the data
           # directory, which takes about a minute in this image.
           for i in $(seq 1 90); do
-            if docker exec -u omm gauss bash -lc 'gsql -d postgres -p 5432 -tAc "select 1"' >/dev/null 2>&1; then
-              echo "opengauss is up"; exit 0
+            if gsql -tAc "select 1" >/dev/null 2>&1; then
+              echo "opengauss is up"
+              break
             fi
             echo "waiting for opengauss... ($i)"; sleep 2
+            if [ "$i" = 90 ]; then docker logs gauss | tail -20; exit 1; fi
           done
-          docker logs gauss | tail -20
-          exit 1
+          # openGauss refuses a remote login by its initial user, so the job creates
+          # an ordinary role for the driver to authenticate as.
+          gsql -c "CREATE USER moonbit WITH PASSWORD 'Moonbit@2026'"
+          gsql -c "GRANT ALL PRIVILEGES TO moonbit"
+          gsql -c "GRANT CREATE ON SCHEMA public TO moonbit"
 
       - name: moon check
         run: moon check --target all --deny-warn
@@ -751,7 +761,7 @@ jobs:
           MOON_PG_TEST: "1"
           PGHOST: 127.0.0.1
           PGPORT: "55432"
-          PGUSER: omm
+          PGUSER: moonbit
           PGPASSWORD: "Moonbit@2026"
           PGDATABASE: postgres
         run: moon test --target native src/conformance_integration_wbtest.mbt
