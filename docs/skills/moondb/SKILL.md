@@ -8,8 +8,10 @@ description: Use when writing MoonBit code that talks to SQLite, PostgreSQL or M
 `moonbitstack/moondb` is the interface layer between MoonBit query code and a
 database driver. It defines `Value`, `Row`, `Driver`, `AsyncDriver`, `Stmt`,
 `Txn`, `Dialect` and `Capabilities`; the drivers (`moonsqlite`,
-`moonpostgres`, `moonmysql`, `moonchdb`) implement them. Code written
-against `Driver` runs on all of them.
+`moonpostgres`, `moonmysql`, `moonchdb`, `moonduckdb`) implement them, and the
+servers that borrow a protocol but not its SQL get a package of their own
+(`moonckdb` for CockroachDB, `moontidb` for TiDB). Code written against `Driver`
+runs on all of them.
 
 ## Install and import
 
@@ -233,6 +235,26 @@ let rows = db.query("SELECT name FROM hero WHERE id = ?", [Int(1)])
   the interface does anyway.
 - **A `String` column is bytes.** It reads back as `Text` when the bytes are UTF-8 and
   as `Blob` when they are not — do not assume text.
+
+## Which server, not just which protocol
+
+A driver tells you the dialect; it cannot tell you the server, because two servers can
+answer the same wire protocol. When that distinction matters — it does for `LISTEN`, for
+stored procedures and for savepoints — the package for that server answers it:
+
+<!-- nocheck -->
+```moonbit
+let conn = @moonckdb.connect("127.0.0.1", 26257, "root", "", "defaultdb")
+let caps = @moonckdb.capabilities_for(@moonckdb.server_of(conn))
+if !caps.notifications {
+  // poll instead of waiting for NOTIFY
+}
+```
+
+`moonduckdb` is the embedded analytical engine: `Driver`, a `Duckdb` dialect, real
+transactions, no savepoints, and the engine loaded at run time — `MOONDUCKDB_LIBRARY`
+points at `libduckdb.so` or `duckdb.dll`, and `drivers/duckdb/scripts/fetch_engine.sh`
+fetches the pinned release.
 
 ## Gotchas
 

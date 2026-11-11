@@ -32,6 +32,7 @@ flowchart TD
       PG["moonpostgres<br/><small>pure-MoonBit wire</small>"]
       MYSQL["moonmysql<br/><small>pure-MoonBit wire</small>"]
       CH["moonchdb<br/><small>pure-MoonBit HTTP</small>"]
+      DUCK["moonduckdb<br/><small>C-FFI, engine loaded</small>"]
       MOCK["MockDriver<br/><small>in-memory, ships here</small>"]
     end
     APP --> ORM --> IFACE
@@ -330,6 +331,8 @@ assert_eq(report.failures(), [])
 | Long parameters (streamed) | — | — | yes, past 1 MiB | — |
 
 Two servers get a package of their own rather than a paragraph: `moonckdb` (CockroachDB) and `moontidb` (TiDB) sit on the driver that already speaks their wire protocol and add the two things the bytes cannot say — `server_of(conn)`, which asks `SELECT version()` and names the server, and `capabilities_for(server)`, which clears the flags that server does not honour (`notifications` for CockroachDB, `multiple_result_sets` for TiDB). Their CI runs the same conformance matrix through their own `connect`.
+
+`moonduckdb` is the embedded analytical counterpart to moonsqlite: the same `Driver` contract, a `Duckdb` dialect of its own, real transactions and no savepoints, and an engine loaded at run time instead of compiled — `drivers/duckdb/scripts/fetch_engine.sh` gets the pinned release, and a checkout without it still builds, with the DuckDB tests stepping aside.
 
 Each driver's CI also runs the shared conformance matrix against servers of a different lineage — CockroachDB, openGauss and TiDB speak a ratified driver's wire protocol, and ClickHouse has a driver of its own — and each driver's README lists the differences those servers bring. A backend outside this repository reports its own through `Driver::dialect` and `Driver::capabilities`; a capability reported false is a plan the query layer lowers, not an error it discovers mid-statement. Binary results and streamed parameters are driver-level choices rather than contract ones: they change how a value crosses the wire, not what the trait can express, so each driver exposes them on its own calls.
 
