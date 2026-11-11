@@ -1,0 +1,40 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moonclickhouse"
+
+import {
+  "moonbitstack/moondb",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct ClickHouseConn {
+  host : String
+  port : Int32
+  user : String
+  password : String
+  database : String
+  mut closed : Bool
+  mut in_transaction : Bool
+}
+pub fn ClickHouseConn::begin(Self) -> Unit raise @moondb.DbError
+pub fn ClickHouseConn::capabilities(Self) -> @moondb.Capabilities
+pub fn ClickHouseConn::close(Self) -> Unit
+pub fn ClickHouseConn::commit(Self) -> Unit raise @moondb.DbError
+pub async fn ClickHouseConn::connect(String, port? : Int32, user? : String, password? : String, database? : String) -> Self raise @moondb.DbError
+pub fn ClickHouseConn::database(Self) -> String
+pub fn ClickHouseConn::dialect(Self) -> @moondb.Dialect
+pub async fn ClickHouseConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
+pub fn ClickHouseConn::in_transaction(Self) -> Bool
+pub async fn ClickHouseConn::ping(Self) -> Bool
+pub async fn ClickHouseConn::prepare(Self, String) -> &@moondb.AsyncStmt raise @moondb.DbError
+pub async fn ClickHouseConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn ClickHouseConn::query_stream(Self, String, Array[@moondb.Value]) -> &@moondb.AsyncCursor raise @moondb.DbError
+pub fn ClickHouseConn::rollback(Self) -> Unit raise @moondb.DbError
+pub impl @moondb.AsyncDriver for ClickHouseConn
+
+// Type aliases
+
+// Traits

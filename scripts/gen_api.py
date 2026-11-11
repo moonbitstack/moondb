@@ -42,6 +42,12 @@ SITES = [
             ("drivers/postgres/src", "moonbitstack/moonpostgres", "moonpostgres", "moonpostgres"),
             ("drivers/mysql/src", "moonbitstack/moonmysql", "moonmysql", "moonmysql"),
             ("drivers/mysql/src/client", "moonbitstack/moonmysql/client", "client", "moonmysql-client"),
+            (
+                "drivers/clickhouse/src",
+                "moonbitstack/moonclickhouse",
+                "moonclickhouse",
+                "moonclickhouse",
+            ),
         ],
     },
 ]

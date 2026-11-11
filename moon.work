@@ -2,5 +2,6 @@ members = [
   ".",
   "./drivers/mysql",
   "./drivers/postgres",
+  "./drivers/clickhouse",
   "./drivers/sqlite",
 ]

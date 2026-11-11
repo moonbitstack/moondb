@@ -45,13 +45,14 @@
 <a href="#moonpostgres">moonpostgres<span class="n">109</span></a>
 <a href="#moonmysql">moonmysql<span class="n">75</span></a>
 <a href="#moonmysql-client">client<span class="n">33</span></a>
+<a href="#moonclickhouse">moonclickhouse<span class="n">15</span></a>
       </aside>
 
       <div>
         <section class="hero" style="padding-top:var(--s5)">
           <p class="folio">API · generated</p>
           <h1 style="font-size:clamp(30px,4vw,46px)">The interface</h1>
-          <p class="lede">440 declarations across 9 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
+          <p class="lede">455 declarations across 10 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
         </section>
 <section class="section first" id="moondb">
 <p class="folio">moonbitstack/moondb</p>
@@ -128,6 +129,7 @@ tx.driver().execute("INSERT INTO hero VALUES ($1, $2)", [Int(1), Text("Nova")])
   named_parameters : Bool
   server_cursors : Bool
   streaming_copy : Bool
+  transactions : Bool
   savepoints : Bool
   multiple_result_sets : Bool
   unsigned_integers : Bool
@@ -148,6 +150,7 @@ tx.driver().execute("INSERT INTO hero VALUES ($1, $2)", [Int(1), Text("Nova")])
   Sqlite
   Postgres
   Mysql
+  Clickhouse
 }</pre></div>
 <div class="entry"><pre class="signature">pub(open) trait Driver {
   fn execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError
@@ -922,6 +925,38 @@ assert_eq(report.failures(), [])
 <div class="entry"><pre class="signature">pub fn MysqlDriver::rollback(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">rollback</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub async fn MysqlRowStream::close(Self) -&gt; Unit</pre><div class="doc"><p>Abandon the stream early, draining any unread rows to the terminating EOF so the connection can run the next statement. Idempotent once the stream is done.</p></div></div>
 <div class="entry"><pre class="signature">pub async fn MysqlRowStream::next(Self) -&gt; @moondb.Row?</pre><div class="doc"><p>The next row, or <code class="inline">None</code> at the EOF that ends the result set. An <code class="inline">ErrorResponse</code> mid-stream is raised.</p></div></div>
+</section>
+<section class="section" id="moonclickhouse">
+<p class="folio">moonbitstack/moonclickhouse</p>
+<h2>moonclickhouse</h2>
+<h3>Types <span class="count">1</span></h3>
+<div class="entry"><pre class="signature">pub struct ClickHouseConn {
+  host : String
+  port : Int32
+  user : String
+  password : String
+  database : String
+  mut closed : Bool
+  mut in_transaction : Bool
+}</pre><div class="doc"><p>A ClickHouse server, reached over its HTTP interface.</p><p>Every statement is one HTTP request on its own connection, which is what the interface itself is: stateless, one query in the body, its parameters in the URL. Nothing is held open between calls, so a connection can be shared by any number of tasks without a lock, and a <code class="inline">close</code> is bookkeeping rather than a round trip.</p><p>The driver asks for <code class="inline">RowBinaryWithNamesAndTypes</code>, so a column value crosses the wire in its own bytes rather than as the text the server would print, and reads the count of written rows back from the <code class="inline">X-ClickHouse-Summary</code> header.</p><pre><code>let db = @clickhouse.ClickHouseConn::connect("127.0.0.1", user="default", database="default")
+db.execute("CREATE TABLE hero (id Int32, name String) ENGINE = Memory", []) |&gt; ignore
+db.execute("INSERT INTO hero VALUES (?, ?)", [Int(1), Text("Nova")]) |&gt; ignore
+let rows = db.query("SELECT name FROM hero WHERE id = ?", [Int(1)])</code></pre></div></div>
+<h3>Functions &amp; methods <span class="count">14</span></h3>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::begin(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p>ClickHouse has no transactions: <code class="inline">begin</code>, <code class="inline">commit</code> and <code class="inline">rollback</code> are recorded so a caller can see the state, but no statement is grouped with another.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::close(Self) -&gt; Unit</pre><div class="doc"><p>Close the connection. The interface is stateless, so this only stops later calls with <code class="inline">Closed</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::commit(Self) -&gt; Unit raise @moondb.DbError</pre></div>
+<div class="entry"><pre class="signature">pub async fn ClickHouseConn::connect(String, port? : Int32, user? : String, password? : String, database? : String) -&gt; Self raise @moondb.DbError</pre><div class="doc"><p>Open a connection to <code class="inline">host:port</code> and prove the credentials with one <code class="inline">SELECT 1</code>. The HTTP interface is request-scoped, so "opening" is that round trip and nothing is retained.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::database(Self) -&gt; String</pre><div class="doc"><p>The database this connection addresses.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn ClickHouseConn::execute(Self, String, Array[@moondb.Value]) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p>Run a statement and discard its rows, reporting how many it wrote. ClickHouse's summary header carries the counts, so <code class="inline">rows_affected</code> is the server's number and not a guess.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::in_transaction(Self) -&gt; Bool</pre><div class="doc"><p>Whether a <code class="inline">begin</code> is outstanding. Nothing is rolled back by it on this engine.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn ClickHouseConn::ping(Self) -&gt; Bool</pre><div class="doc"><p>Whether the server answers <code class="inline">SELECT 1</code>, reported as a verdict rather than raised.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn ClickHouseConn::prepare(Self, String) -&gt; &amp;@moondb.AsyncStmt raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">prepare</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn ClickHouseConn::query(Self, String, Array[@moondb.Value]) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p>Run a row-returning statement and materialise the result.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn ClickHouseConn::query_stream(Self, String, Array[@moondb.Value]) -&gt; &amp;@moondb.AsyncCursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn ClickHouseConn::rollback(Self) -&gt; Unit raise @moondb.DbError</pre></div>
 </section>
         <div class="cta">
           <a class="btn primary" href="guide.html">Implement a driver</a>

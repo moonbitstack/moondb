@@ -625,6 +625,141 @@ jobs:
         run: |
           moon fmt && git diff --exit-code
 
+  # An analytical engine, reached over its HTTP interface: no transactions, no
+  # cursors, no prepared statements — the shared matrix records those as skipped and
+  # asserts everything the contract does require.
+  clickhouse:
+    name: moonclickhouse (native, live ClickHouse)
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: drivers/clickhouse
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: start ClickHouse
+        run: |
+          # The image disables network access for `default` unless a user is
+          # provisioned, so the job creates one before the driver connects.
+          docker run -d --name ch \
+            -p 8123:8123 \
+            -e CLICKHOUSE_USER=moonbit \
+            -e CLICKHOUSE_PASSWORD=Moonbit2026 \
+            -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse/clickhouse-server:24.8
+
+      - name: install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: wait for ClickHouse
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8123/ping >/dev/null 2>&1; then
+              echo "clickhouse is up"; exit 0
+            fi
+            echo "waiting for clickhouse... ($i)"; sleep 2
+          done
+          docker logs ch | tail -20
+          exit 1
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (the shared matrix against live ClickHouse)
+        env:
+          CLICKHOUSE_TEST: "1"
+          CLICKHOUSE_HOST: "127.0.0.1"
+          CLICKHOUSE_PORT: "8123"
+          CLICKHOUSE_USER: "moonbit"
+          CLICKHOUSE_PASSWORD: "Moonbit2026"
+          CLICKHOUSE_DB: "default"
+        run: moon test --target native
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code
+
+      - name: interfaces are up to date
+        run: |
+          moon info --target all && git diff --exit-code
+
+  # openGauss speaks PostgreSQL's wire protocol with its own authentication and a
+  # narrower SQL surface. Same driver, same contract, so the shared matrix is what CI
+  # checks here; the driver's PostgreSQL-only features (LISTEN/NOTIFY, DOMAIN,
+  # ON CONFLICT) are not implemented by the server and are listed in its README.
+  opengauss:
+    name: moonpostgres (native, live openGauss)
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: drivers/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: start openGauss
+        run: |
+          docker run -d --name gauss --privileged=true --shm-size=1g \
+            -e GS_PASSWORD=Moonbit@2026 \
+            -p 55432:5432 \
+            opengauss/opengauss-server:7.0.0-RC3.B025-amd64-openEuler22.03
+
+      - name: install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: wait for openGauss
+        run: |
+          # The server answers SQL only once it has finished initialising the data
+          # directory, which takes about a minute in this image.
+          for i in $(seq 1 90); do
+            if docker exec -u omm gauss bash -lc 'gsql -d postgres -p 5432 -tAc "select 1"' >/dev/null 2>&1; then
+              echo "opengauss is up"; exit 0
+            fi
+            echo "waiting for opengauss... ($i)"; sleep 2
+          done
+          docker logs gauss | tail -20
+          exit 1
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (the shared matrix against live openGauss)
+        env:
+          MOON_PG_TEST: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "55432"
+          PGUSER: omm
+          PGPASSWORD: "Moonbit@2026"
+          PGDATABASE: postgres
+        run: moon test --target native src/conformance_integration_wbtest.mbt
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code
+
   # The other MySQL-compatible server, from a different lineage: TiDB speaks the
   # protocol and SQL of MySQL but implements neither of MySQL's two big features the
   # driver also offers (no COPY, no server cursor), and its own dialect on top. Same
