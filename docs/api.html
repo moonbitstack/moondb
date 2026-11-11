@@ -49,13 +49,14 @@
 <a href="#moonckdb">moonckdb<span class="n">7</span></a>
 <a href="#moontidb">moontidb<span class="n">7</span></a>
 <a href="#moonduckdb">moonduckdb<span class="n">25</span></a>
+<a href="#moonsqls">moonsqls<span class="n">26</span></a>
       </aside>
 
       <div>
         <section class="hero" style="padding-top:var(--s5)">
           <p class="folio">API · generated</p>
           <h1 style="font-size:clamp(30px,4vw,46px)">The interface</h1>
-          <p class="lede">494 declarations across 13 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
+          <p class="lede">520 declarations across 14 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
         </section>
 <section class="section first" id="moondb">
 <p class="folio">moonbitstack/moondb</p>
@@ -156,6 +157,7 @@ tx.driver().execute("INSERT INTO hero VALUES ($1, $2)", [Int(1), Text("Nova")])
   Mysql
   Clickhouse
   Duckdb
+  Sqlserver
 }</pre></div>
 <div class="entry"><pre class="signature">pub(open) trait Driver {
   fn execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError
@@ -1034,6 +1036,53 @@ let rows = db.query("SELECT name FROM hero WHERE id = ?", [Int(1)])</code></pre>
 <div class="entry"><pre class="signature">pub fn DuckdbStmt::query(Self) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn DuckdbStmt::query_stream(Self) -&gt; &amp;@moondb.Cursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn DuckdbStmt::sql(Self) -&gt; String</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">sql</code>, callable on the value directly.</p></div></div>
+</section>
+<section class="section" id="moonsqls">
+<p class="folio">moonbitstack/moonsqls</p>
+<h2>moonsqls</h2>
+<h3>Types <span class="count">3</span></h3>
+<div class="entry"><pre class="signature">pub struct SqlServerConn {
+  wire : TdsWire
+  mut closed : Bool
+  database : String
+  mut txn : Bytes
+}</pre><div class="doc"><p>A live connection to a SQL Server instance, speaking TDS 7.4 directly. Open it with <code class="inline">SqlServerConn::connect</code>; it implements <code class="inline">@moondb.AsyncDriver</code>, so a query layer written for PostgreSQL or MySQL drives it unchanged.</p><p>Every statement is either a SQL batch or an RPC to <code class="inline">sp_executesql</code>, and the answer is read out of the token stream — <code class="inline">COLMETADATA</code>, <code class="inline">ROW</code>, <code class="inline">NBCROW</code>, <code class="inline">DONE</code>, <code class="inline">ERROR</code> — rather than through a client library.</p></div></div>
+<div class="entry"><pre class="signature">pub struct SqlServerStmt {
+  conn : SqlServerConn
+  sql : String
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}</pre><div class="doc"><p>One SQL text, run with new values on every call. The values are bound through <code class="inline">sp_executesql</code>, so they never enter the statement text.</p></div></div>
+<div class="entry"><pre class="signature">pub struct TdsWire {
+  sock : @socket.Tcp
+  mut tls : @tls.Conn?
+  mut pending : Bytes
+  mut packet_id : Int32
+}</pre><div class="doc"><p>The transport under the protocol.</p></div></div>
+<h3>Functions &amp; methods <span class="count">23</span></h3>
+<div class="entry"><pre class="signature">pub fn permissive_tls() -&gt; @tls.Client</pre><div class="doc"><p>A TLS configuration that encrypts without authenticating: SQL Server ships a self-signed certificate, and a driver that refused it would refuse every default install. Pass your own <code class="inline">@tls.Client</code> to <code class="inline">connect</code> to check the chain instead.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::begin(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">begin</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqlServerConn::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::commit(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">commit</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::connect(String, Int32, String, String, String, encrypt? : Bool, tls? : @tls.Client) -&gt; Self raise @moondb.DbError</pre><div class="doc"><p>Open a connection. <code class="inline">encrypt</code> defaults to true: the login packet carries a password, and prelogin is where the client says so. A server that answers "encryption not supported" gets a clear session, because the alternative is refusing to connect to it.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqlServerConn::database(Self) -&gt; String</pre><div class="doc"><p>The database the session is in.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqlServerConn::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::execute(Self, String, Array[@moondb.Value]) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::ping(Self) -&gt; Bool</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">ping</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::prepare(Self, String) -&gt; &amp;@moondb.AsyncStmt raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">prepare</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::query(Self, String, Array[@moondb.Value]) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::query_stream(Self, String, Array[@moondb.Value]) -&gt; &amp;@moondb.AsyncCursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerConn::rollback(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">rollback</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerStmt::bind(Self, Array[@moondb.Value]) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">bind</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerStmt::bind_named(Self, Map[String, @moondb.Value]) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">bind_named</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerStmt::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerStmt::execute(Self) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqlServerStmt::new(SqlServerConn, String) -&gt; Self</pre></div>
+<div class="entry"><pre class="signature">pub fn SqlServerStmt::params(Self) -&gt; Array[String]</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">params</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerStmt::query(Self) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn SqlServerStmt::query_stream(Self) -&gt; &amp;@moondb.AsyncCursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn SqlServerStmt::sql(Self) -&gt; String</pre><div class="doc"><p><code class="inline">@moondb.AsyncStmt</code>'s <code class="inline">sql</code>, callable on the value directly.</p></div></div>
 </section>
         <div class="cta">
           <a class="btn primary" href="guide.html">Implement a driver</a>

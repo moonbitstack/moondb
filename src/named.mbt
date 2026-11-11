@@ -176,7 +176,7 @@ fn scan_named(sql : String, dialect : Dialect) -> Named raise DbError {
             slots.push(name)
             push_str(sb, Dialect::Postgres.placeholder(k))
           }
-        Sqlite | Mysql | Clickhouse | Duckdb => {
+        Sqlite | Mysql | Clickhouse | Duckdb | Sqlserver => {
           slots.push(name)
           sb.write_char('?')
         }

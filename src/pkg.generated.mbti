@@ -112,6 +112,7 @@ pub(all) enum Dialect {
   Mysql
   Clickhouse
   Duckdb
+  Sqlserver
 }
 pub fn Dialect::equal(Self, Self) -> Bool
 pub fn Dialect::name(Self) -> String

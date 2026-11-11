@@ -1,0 +1,91 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moontls/alert"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn decode(BytesView) -> Alert raise Refused
+
+pub fn[T] decoded(T?) -> T raise Alert
+
+pub fn encode(Alert) -> Bytes
+
+pub fn fatal(Kind) -> Alert
+
+pub fn warning(Kind) -> Alert
+
+// Errors
+#derive(Eq, @debug.Debug)
+pub(all) suberror Alert {
+  Alert(level~ : Level, kind~ : Kind)
+}
+pub fn Alert::equal(Self, Self) -> Bool
+pub fn Alert::not_equal(Self, Self) -> Bool
+pub fn Alert::output(Self, &Logger) -> Unit
+pub fn Alert::to_repr(Self) -> @debug.Repr
+pub fn Alert::to_string(Self) -> String
+pub impl Show for Alert
+
+#derive(Eq, @debug.Debug)
+pub(all) suberror Refused
+pub fn Refused::equal(Self, Self) -> Bool
+pub fn Refused::not_equal(Self, Self) -> Bool
+pub fn Refused::to_repr(Self) -> @debug.Repr
+
+// Types and methods
+#derive(Eq, @debug.Debug)
+pub(all) enum Kind {
+  CloseNotify
+  UnexpectedMessage
+  BadRecordMac
+  RecordOverflow
+  HandshakeFailure
+  BadCertificate
+  UnsupportedCertificate
+  CertificateRevoked
+  CertificateExpired
+  CertificateUnknown
+  IllegalParameter
+  UnknownCa
+  AccessDenied
+  DecodeError
+  DecryptError
+  ProtocolVersion
+  InsufficientSecurity
+  InternalError
+  InappropriateFallback
+  UserCanceled
+  NoRenegotiation
+  MissingExtension
+  UnsupportedExtension
+  UnrecognizedName
+  BadCertificateStatusResponse
+  UnknownPskIdentity
+  CertificateRequired
+  NoApplicationProtocol
+  Other(Int32)
+}
+pub fn Kind::code(Self) -> Int32
+pub fn Kind::equal(Self, Self) -> Bool
+pub fn Kind::is_fatal(Self) -> Bool
+pub fn Kind::name(Self) -> String
+pub fn Kind::not_equal(Self, Self) -> Bool
+pub fn Kind::of(Int32) -> Self
+pub fn Kind::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Level {
+  Warning
+  Fatal
+}
+pub fn Level::code(Self) -> Int32
+pub fn Level::equal(Self, Self) -> Bool
+pub fn Level::not_equal(Self, Self) -> Bool
+pub fn Level::of(Int32) -> Self?
+pub fn Level::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits

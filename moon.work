@@ -6,5 +6,7 @@ members = [
   "./drivers/ckdb",
   "./drivers/tidb",
   "./drivers/duckdb",
+  "./drivers/sqls",
+  "./vendor/moontls",
   "./drivers/sqlite",
 ]

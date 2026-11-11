@@ -33,6 +33,10 @@ pub(all) enum Dialect {
   /// its types its own way. A query layer that treated it as either neighbour would
   /// emit SQL the engine rejects.
   Duckdb
+  /// SQL Server's T-SQL numbers its parameters with a name rather than a position —
+  /// `@p1`, `@p2` — and its type names, its `TOP` instead of `LIMIT` and its `OUTPUT`
+  /// instead of `RETURNING` are its own.
+  Sqlserver
 }
 
 ///|
@@ -45,6 +49,7 @@ pub(all) enum Dialect {
 pub fn Dialect::placeholder(self : Dialect, n : Int32) -> String {
   match self {
     Postgres => "$" + n.to_string()
+    Sqlserver => "@p" + n.to_string()
     Sqlite | Mysql | Clickhouse | Duckdb => "?"
   }
 }
@@ -59,6 +64,7 @@ pub fn Dialect::name(self : Dialect) -> String {
     Mysql => "mysql"
     Clickhouse => "clickhouse"
     Duckdb => "duckdb"
+    Sqlserver => "sqlserver"
   }
 }
 
@@ -74,6 +80,7 @@ pub fn Dialect::parse(name : String) -> Dialect? {
     "mysql" | "mariadb" => Some(Mysql)
     "clickhouse" | "ch" => Some(Clickhouse)
     "duckdb" => Some(Duckdb)
+    "sqlserver" | "mssql" | "tds" => Some(Sqlserver)
     _ => None
   }
 }

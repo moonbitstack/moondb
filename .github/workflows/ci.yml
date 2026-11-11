@@ -738,6 +738,73 @@ jobs:
         run: |
           moon info --target all && git diff --exit-code
 
+  # SQL Server speaks a protocol of its own — TDS — with encryption negotiated inside
+  # prelogin and parameters bound through an RPC to sp_executesql. The job starts a real
+  # server and runs the shared matrix against it.
+  sqls:
+    name: moonsqls (native, live SQL Server 2022)
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: drivers/sqls
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: start SQL Server
+        run: |
+          docker run -d --name mssql \
+            -e ACCEPT_EULA=Y \
+            -e MSSQL_SA_PASSWORD='Moonbit!2026' \
+            -e MSSQL_PID=Developer \
+            -p 1433:1433 \
+            mcr.microsoft.com/mssql/server:2022-latest
+
+      - name: install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: wait for SQL Server
+        run: |
+          # The server initialises its system databases on first start; the tools ship
+          # inside the image, so the wait probes with a real login.
+          for i in $(seq 1 120); do
+            if docker exec mssql /opt/mssql-tools18/bin/sqlcmd \
+                -S 127.0.0.1 -U sa -P 'Moonbit!2026' -C -Q "select 1" >/dev/null 2>&1; then
+              echo "sql server is up"; exit 0
+            fi
+            echo "waiting for sql server... ($i)"; sleep 2
+          done
+          docker logs mssql | tail -30
+          exit 1
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (the shared matrix against live SQL Server)
+        env:
+          MSSQL_TEST: "1"
+          MSSQL_HOST: "127.0.0.1"
+          MSSQL_PORT: "1433"
+          MSSQL_USER: "sa"
+          MSSQL_PASSWORD: "Moonbit!2026"
+          MSSQL_DB: "master"
+        run: moon test --target native
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code
+
   # openGauss speaks PostgreSQL's wire protocol with its own authentication and a
   # narrower SQL surface. Same driver, same contract, so the shared matrix is what CI
   # checks here; the driver's PostgreSQL-only features (LISTEN/NOTIFY, DOMAIN,

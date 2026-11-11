@@ -45,6 +45,12 @@ fn create_table(dialect : @moondb.Dialect, table : String) -> String {
       "CREATE TABLE " +
       table +
       " (id INTEGER PRIMARY KEY, n BIGINT NOT NULL, label VARCHAR, score DOUBLE, payload BLOB, flag BOOLEAN, missing VARCHAR)"
+    // T-SQL has no `BOOLEAN` and no `BLOB`: a flag is `BIT`, bytes are `VARBINARY`, and a
+    // string that may hold one needs `NVARCHAR` to survive a non-Latin character.
+    Sqlserver =>
+      "CREATE TABLE " +
+      table +
+      " (id INT PRIMARY KEY, n BIGINT NOT NULL, label NVARCHAR(64), score FLOAT, payload VARBINARY(64), flag BIT, missing NVARCHAR(64))"
   }
 }
 
@@ -107,16 +113,30 @@ fn count_rows(dialect : @moondb.Dialect, table : String) -> String {
 /// The `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` triple. The three ratified dialects and
 /// the wire-compatible servers behind them spell all three the same way, which is why
 /// nested transactions are expressible without a capability probe.
-fn savepoint(name : String) -> String {
-  "SAVEPOINT " + name
+fn savepoint(dialect : @moondb.Dialect, name : String) -> String {
+  if dialect is Sqlserver {
+    "SAVE TRANSACTION " + name
+  } else {
+    "SAVEPOINT " + name
+  }
 }
 
 ///|
-fn rollback_to_savepoint(name : String) -> String {
-  "ROLLBACK TO SAVEPOINT " + name
+fn rollback_to_savepoint(dialect : @moondb.Dialect, name : String) -> String {
+  if dialect is Sqlserver {
+    "ROLLBACK TRANSACTION " + name
+  } else {
+    "ROLLBACK TO SAVEPOINT " + name
+  }
 }
 
 ///|
-fn release_savepoint(name : String) -> String {
-  "RELEASE SAVEPOINT " + name
+/// A savepoint is released implicitly at the end of a T-SQL transaction, so the
+/// statement that means "release" there is the one that changes nothing.
+fn release_savepoint(dialect : @moondb.Dialect, name : String) -> String {
+  if dialect is Sqlserver {
+    "SELECT 1 AS released"
+  } else {
+    "RELEASE SAVEPOINT " + name
+  }
 }

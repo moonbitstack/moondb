@@ -66,6 +66,12 @@ SITES = [
                 "moonduckdb",
                 "moonduckdb",
             ),
+            (
+                "drivers/sqls/src",
+                "moonbitstack/moonsqls",
+                "moonsqls",
+                "moonsqls",
+            ),
         ],
     },
 ]

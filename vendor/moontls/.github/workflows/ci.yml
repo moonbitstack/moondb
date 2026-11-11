@@ -1,0 +1,129 @@
+name: Check and Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-26.04, macos-26, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: install-unix
+        if: ${{ runner.os != 'Windows' }}
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: install-windows
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          Set-ExecutionPolicy RemoteSigned -Scope CurrentUser; irm https://cli.moonbitlang.com/install/powershell.ps1 | iex
+          "C:\Users\runneradmin\.moon\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (all backends)
+        run: moon test --target all
+
+      - name: examples run
+        if: runner.os == 'Linux'
+        run: |
+          for dir in src/examples/*/; do
+            if grep -q 'kind: "executable"' "$dir/moon.pkg" && ! grep -q 'supported_targets = "js"' "$dir/moon.pkg"; then
+              moon run "$dir" --target native > /dev/null
+            fi
+          done
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code
+
+      - name: interfaces are up to date
+        run: |
+          moon info --target all && git diff --exit-code
+
+      # A reader pastes the blocks of the README and the skills into a project, so they have to
+      # compile as written, against this commit's source.
+      - name: the code in the docs compiles
+        if: runner.os == 'Linux'
+        run: python3 scripts/check_snippets.py
+
+      - name: the skills are valid
+        if: runner.os == 'Linux'
+        run: |
+          for dir in docs/skills/*/; do
+            case "$dir" in *CHANGE-ME*) continue ;; esac
+            [ -f "$dir/SKILL.md" ] || continue
+            pipx run --spec skills-ref agentskills validate "$dir"
+          done
+
+  # The interop matrix, against OpenSSL, BoringSSL, Go, Python and pion. It needs a socket, which
+  # the library never opens, so the peer is what runs here: `integration/src/peer`, a module of its
+  # own so that the library's dependencies stay what the library needs. The workspace (`moon.work`)
+  # resolves `moonbitstack/moontls` to this checkout, so the peer exercises the source under test.
+  # The cases it drives are the ones README.md's "Conformance" section counts.
+  interop:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: install moonbit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: install go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: build the peer
+        run: |
+          moon update
+          moon build --target native
+
+      # The one peer that has to be built rather than installed. It is worth the three minutes:
+      # BoringSSL reads RFC 8446 more strictly than OpenSSL and is where this library's
+      # CertificateRequest context and its post-quantum ClientHello handling get judged.
+      # What is wanted is the `bssl` tool, not a warning audit: BoringSSL builds with `-Werror`,
+      # and a newer GCC in the runner image turns one of its own warnings into a build failure
+      # (`stringop-overflow` in keccak, on ubuntu-26.04 with GCC 16). The flag is dropped from the
+      # build rather than the case, so a toolchain bump cannot take the job down with it.
+      - name: build boringssl
+        run: |
+          git clone --depth 1 https://github.com/google/boringssl.git "$RUNNER_TEMP/boringssl"
+          sed -i 's/set(C_CXX_WARNINGS -Werror/set(C_CXX_WARNINGS -Wno-error/' "$RUNNER_TEMP/boringssl/CMakeLists.txt"
+          cmake -GNinja -B "$RUNNER_TEMP/boringssl/build" -S "$RUNNER_TEMP/boringssl" -DCMAKE_BUILD_TYPE=Release
+          ninja -C "$RUNNER_TEMP/boringssl/build" bssl
+
+      - name: interop against OpenSSL, BoringSSL, Go and pion
+        env:
+          BSSL: ${{ runner.temp }}/boringssl/build/bssl
+        run: bash scripts/tls_interop.sh

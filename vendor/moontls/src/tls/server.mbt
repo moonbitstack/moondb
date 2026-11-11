@@ -1,0 +1,484 @@
+// Copyright 2026 Leo Cheng
+// SPDX-License-Identifier: Apache-2.0
+
+///|
+fn Conn::on_server(
+  self : Conn,
+  config : Server,
+  kind : @msg.Kind,
+  body : Bytes,
+  raw : Bytes,
+) -> Unit raise @alert.Alert {
+  match (self.phase, kind) {
+    (Legacy(step), _) => self.on_server12(config, step, kind, body, raw)
+    (Open, ClientHello) if self.version is Some(Tls10 | Tls11 | Tls12) =>
+      if config.renegotiation {
+        self.accept_renegotiation(
+          config,
+          @alert.decoded(@msg.read_hello(body[:])),
+          raw,
+        )
+      } else {
+        self.decline_renegotiation()
+      }
+    (Waiting, ClientHello) => self.on_client_hello(config, body, raw)
+    (Certifying(Chain), Certificate) =>
+      self.on_client_chain(config, body, raw, renewed=false)
+    (Certifying(Proof), CertificateVerify) =>
+      self.on_client_proof(body, raw, renewed=false)
+    (Renewing(Chain), Certificate) =>
+      self.on_client_chain(config, body, raw, renewed=true)
+    (Renewing(Proof), CertificateVerify) =>
+      self.on_client_proof(body, raw, renewed=true)
+    (Renewing(Proof), Finished) => self.on_renewed(body, raw)
+    (Finishing | Certifying(_), EndOfEarlyData) => {
+      // §4.5: the message is the client saying its 0-RTT data is over, and it comes before
+      // anything under the handshake key.
+      // RFC 9001 §8.3: over QUIC it is a protocol violation.
+      if !self.early_ok || self.quic is Some(_) || body.length() > 0 {
+        raise @alert.fatal(UnexpectedMessage)
+      }
+      self.early_reader = None
+      self.record(raw[:])
+    }
+    (Finishing, Finished) => {
+      self.check_finished(self.client_secret, body)
+      self.aligned()
+      self.record(raw[:])
+      self.reader = Some(
+        @record.Cipher::new(self.client_app[:], suite=self.suite.unwrap()),
+      )
+      self.phase = Open
+      if self.quic is Some(q) {
+        q.reading = Application
+      }
+      // §4.6.1: the resumption secret is over the transcript through the client's Finished, and
+      // every ticket handed out stands for it.
+      self.close_transcript()
+      self.issue_tickets(config)
+    }
+    (Open, KeyUpdate) => self.on_update(body)
+    _ => raise @alert.fatal(UnexpectedMessage)
+  }
+}
+
+///|
+fn Conn::on_client_hello(
+  self : Conn,
+  config : Server,
+  body : Bytes,
+  raw : Bytes,
+) -> Unit raise @alert.Alert {
+  let hello = @alert.decoded(
+    @msg.read_hello(body[:], cookie=self.legacy_datagram),
+  )
+  self.modes_dhe = declares_psk_dhe(hello)
+  self.aligned()
+  if self.quic is Some(q) {
+    q.on_hello(hello)
+  } else if !self.retried &&
+    config.versions.iter().any(v => v.is_legacy()) &&
+    !offers13(config, hello, datagram=self.datagram) {
+    return self.client_hello12(config, hello, raw)
+  }
+  // RFC 9147 §5.3: DTLS 1.3 keeps the ClientHello's cookie field and requires it empty — the
+  // cookie itself travels in an extension. Anything in the field is a DTLS 1.2 client, or a peer
+  // that has confused the two, and either way this server cannot go on.
+  if self.legacy_datagram && hello.cookie.length() > 0 {
+    raise @alert.fatal(IllegalParameter)
+  }
+  if self.retried && !self.same_hello(self.first_hello, hello) {
+    raise @alert.fatal(IllegalParameter)
+  }
+  // §4.2.11: the PSK decides the suite before anything is negotiated, and the binder covers this
+  // very message, which is why the raw octets are read here rather than after a decision.
+  if !self.retried {
+    self.first_hello = raw
+    self.accept_psk(config, hello, raw)
+  }
+  let schemes = schemes(config.key)
+  self.note_requests(hello)
+  self.answer_srtp(config, hello)
+  let choice = @hs.negotiate(
+    hello,
+    groups=config.groups[:],
+    schemes=schemes[:],
+    datagram=self.datagram,
+  )
+  let suite = if self.resumed {
+    self.suite.unwrap()
+  } else {
+    guard config.suites.iter().find_first(s => hello.suites.contains(s.code()))
+      is Some(suite) else {
+      raise @alert.fatal(HandshakeFailure)
+    }
+    suite
+  }
+  // A retry after a PSK was taken would need a second binder this library does not build: drop
+  // the resumption and run the handshake in full, which is always allowed.
+  if self.resumed && choice is Retry(_) {
+    self.resumed = false
+    self.psk = b""
+    self.early_ok = false
+  }
+  let early = @ext.find(hello.extensions[:], EarlyData) is Some(_)
+  // §4.1.2: the ClientHello after a HelloRetryRequest offers no early data.
+  if self.retried && (self.suite != Some(suite) || early) {
+    raise @alert.fatal(IllegalParameter)
+  }
+  self.suite = Some(suite)
+  self.version = Some(Tls13)
+  self.early = if early { config.early_limit } else { 0 }
+  // RFC 9147 §5.1: a datagram server that has not decided to keep anything for this client asks
+  // it to echo a cookie, and goes on only for a ClientHello that does. A hello carrying one this
+  // server never gave is not owed another retry — it is a handshake that ends there.
+  if self.cookie is Some(rules) {
+    match echoes_cookie(hello) {
+      Some(echoed) =>
+        match (rules.open)(echoed[:]) {
+          Some((history, asked)) => {
+            // From here the handshake is the one a retry stands on, whichever instance answered
+            // the first hello.
+            self.retried = true
+            // The transcript is the retry's: the hash of the first ClientHello, then the retry
+            // itself, which is written again here from what the cookie carried and the hello
+            // repeated — it is the same message octet for octet, because every field of it is
+            // either in the cookie or in the hello that echoed it.
+            self.retry_history = history
+            self.retry_group = asked
+            let hrr = @msg.server_hello(
+              @hs.retry_cookie(
+                hello.session_id[:],
+                suite.code(),
+                asked,
+                echoed[:],
+                datagram=self.datagram,
+              ),
+            )
+            self.begin_transcript(Some(hrr))
+          }
+          None => raise @alert.fatal(IllegalParameter)
+        }
+      None =>
+        if self.retried {
+          raise @alert.fatal(IllegalParameter)
+        } else {
+          // The retry may ask for a key share in the same breath when the first hello left one
+          // out, because a second retry is forbidden.
+          let asked = match choice {
+            Retry(group) => Some(group)
+            _ => None
+          }
+          let history = self.digest().hash(raw)
+          let cookie = (rules.seal)(history[:], asked)
+          self.retried = true
+          self.retry_group = asked
+          self.retry_history = history
+          let hrr = @msg.server_hello(
+            @hs.retry_cookie(
+              hello.session_id[:],
+              suite.code(),
+              asked,
+              cookie[:],
+              datagram=self.datagram,
+            ),
+          )
+          self.begin_transcript(Some(hrr))
+          self.send_handshake(hrr)
+          // RFC 9147 §5: no change_cipher_spec over a datagram, whatever the session id says.
+          if !self.datagram && hello.session_id.length() > 0 {
+            self.send_change_cipher_spec()
+          }
+          return
+        }
+    }
+  }
+  match choice {
+    Retry(group) => {
+      if self.retried {
+        raise @alert.fatal(IllegalParameter)
+      }
+      self.retried = true
+      self.retry_group = Some(group)
+      self.first_hello = raw
+      let hrr = @msg.server_hello(
+        @hs.retry(
+          echoed_id(self, hello),
+          suite.code(),
+          group,
+          datagram=self.datagram,
+        ),
+      )
+      self.begin_transcript(Some(hrr))
+      self.send_handshake(hrr)
+      if !self.datagram && hello.session_id.length() > 0 {
+        self.send_change_cipher_spec()
+      }
+    }
+    Chosen(group~, key~, scheme~) => {
+      if self.retried && self.retry_group is Some(wanted) && group != wanted {
+        raise @alert.fatal(IllegalParameter)
+      }
+      if self.transcript is None {
+        self.begin_transcript(None)
+      }
+      self.record(raw[:])
+      self.note_server_name(hello)
+      let encrypted : Array[@ext.Ext] = []
+      if self.pick_alpn(config, hello) is Some(p) {
+        encrypted.push({ kind: Alpn, data: @ext.protocols([p][:]), })
+      }
+      if self.quic is Some(q) {
+        encrypted.push({ kind: QuicTransportParameters, data: q.params, })
+      }
+      if self.early_ok {
+        encrypted.push({ kind: EarlyData, data: @ext.early_data(), })
+      }
+      match self.srtp_profile {
+        Some(profile) =>
+          encrypted.push({
+            kind: UseSrtp,
+            data: @ext.use_srtp([profile.code()][:], b""),
+          })
+        None => ()
+      }
+      self.answered12(config, encrypted)
+      let (public, shared) = respond(group, key, self.rand)
+      self.group = Some(group)
+      let random = (self.rand)(32)
+      let extensions : Array[@ext.Ext] = [
+        { kind: KeyShare, data: @ext.selected_share(group, public[:]), },
+      ]
+      if self.resumed {
+        // §4.2.11: the ServerHello answers with the index of the identity it took.
+        let chosen = Bytes::from_array([b'\x00', b'\x00'])
+        extensions.push({ kind: PreSharedKey, data: chosen, })
+      }
+      let sh = @msg.server_hello(
+        @hs.server_hello(
+          random[:],
+          echoed_id(self, hello),
+          suite.code(),
+          extensions=extensions[:],
+          datagram=self.datagram,
+        ),
+      )
+      self.send_handshake(sh)
+      if !self.datagram && hello.session_id.length() > 0 {
+        self.send_change_cipher_spec()
+      }
+      self.record(sh[:])
+      self.open_handshake(shared)
+      self.open_early(self.first_hello)
+      self.writer = Some(@record.Cipher::new(self.server_secret[:], suite~))
+      self.reader = Some(@record.Cipher::new(self.client_secret[:], suite~))
+      self.keyed(Handshake)
+      let flight = Buffer()
+      let ee = @msg.frame(
+        EncryptedExtensions,
+        @msg.encrypted_extensions(encrypted[:])[:],
+      )
+      self.record(ee[:])
+      flight.write_bytes(ee)
+      // RFC 8446 §4.4.2: the request comes after EncryptedExtensions and before the server's own
+      // Certificate, so a client answers it in the same flight.
+      let asked = config.client_auth.mode is (Requested | Required)
+      if asked {
+        if self.now == 0L {
+          raise @alert.fatal(InternalError)
+        }
+        let request = self.ask_certificate(
+          config,
+          config.client_auth.mode is Required,
+        )
+        self.record(request[:])
+        flight.write_bytes(request)
+      }
+      // §4.4.2: a resumed handshake proves nothing with a certificate — the ticket is the
+      // authentication — so these two messages are simply absent.
+      if !self.resumed {
+        // RFC 8446 §4.4.2.1: the status travels in the leaf's entry of the Certificate message.
+        let stapled = if @ext.find(hello.extensions[:], StatusRequest)
+          is Some(_) {
+          self.staple(config)
+        } else {
+          None
+        }
+        let body = match stapled {
+          Some(response) =>
+            @msg.certificate_status(config.chain[:], response[:])
+          None => @msg.certificate(config.chain[:])
+        }
+        // RFC 8879 §4: a Certificate may travel compressed when the client named an algorithm and
+        // the result is actually shorter; the uncompressed length rides in front of it.
+        let zlib_offered = match
+          @ext.find(hello.extensions[:], CompressCertificate) {
+          Some(e) =>
+            match @ext.read_compression_algorithms(e.data[:]) {
+              Some(ids) => ids.contains(@ext.zlib_compression)
+              None => false
+            }
+          None => false
+        }
+        let message = if config.compress && zlib_offered {
+          let packed = @zlib.zlib(body[:])
+          if packed.length() + 9 < body.length() {
+            @msg.frame(
+              CompressedCertificate,
+              @msg.compressed_certificate(
+                @ext.zlib_compression,
+                body.length(),
+                packed[:],
+              )[:],
+            )
+          } else {
+            @msg.frame(Certificate, body[:])
+          }
+        } else {
+          @msg.frame(Certificate, body[:])
+        }
+        self.record(message[:])
+        flight.write_bytes(message)
+        let signature = sign(
+          config.key,
+          scheme,
+          @msg.signed(@msg.server_context, self.th()[:]),
+        )
+        let cv = @msg.frame(
+          CertificateVerify,
+          @msg.certificate_verify(signature[:], scheme)[:],
+        )
+        self.record(cv[:])
+        flight.write_bytes(cv)
+      }
+      let fin = @msg.frame(
+        Finished,
+        @keys.finished(
+          self.server_secret[:],
+          self.th()[:],
+          digest=self.digest(),
+          prefix=self.prefix(),
+        )[:],
+      )
+      self.record(fin[:])
+      flight.write_bytes(fin)
+      self.send_handshake(flight.to_bytes())
+      self.open_application()
+      self.writer = Some(@record.Cipher::new(self.server_app[:], suite~))
+      self.keyed(Application)
+      self.phase = if asked { Certifying(Chain) } else { Finishing }
+    }
+  }
+}
+
+///|
+/// Answer `use_srtp` (RFC 5764 §4.1.1): a profile from this server's own list
+/// that the client also offered, or a handshake failure when they share none.
+fn Conn::answer_srtp(
+  self : Conn,
+  config : Server,
+  hello : @msg.Hello,
+) -> Unit raise @alert.Alert {
+  guard config.srtp.length() > 0 else { return }
+  guard @ext.find(hello.extensions[:], UseSrtp) is Some(e) else { return }
+  guard @ext.read_use_srtp(e.data[:]) is Some((offered, _)) else {
+    raise @alert.fatal(DecodeError)
+  }
+  guard @srtp.select(offered[:], supported=config.srtp[:]) is Some(profile) else {
+    raise @alert.fatal(HandshakeFailure)
+  }
+  self.srtp_profile = Some(profile)
+}
+
+///|
+/// Keep the name a client asked for by SNI, and say whether it asked.
+fn Conn::note_server_name(
+  self : Conn,
+  hello : @msg.Hello,
+) -> Unit raise @alert.Alert {
+  guard @ext.find(hello.extensions[:], ServerName) is Some(e) else { return }
+  // RFC 6066 §3: an entry of another type is passed over, and two host names are forbidden.
+  match @alert.decoded(@ext.read_server_names(e.data[:])) {
+    [] => ()
+    [name] => {
+      // RFC 6066 §3: a host name is ASCII, and a name with control characters in it is an attempt
+      // on whatever logs or routes by it.
+      if !name.iter().all(c => c > ' ' && c <= '~') {
+        raise @alert.fatal(IllegalParameter)
+      }
+      self.sni = Some(name)
+    }
+    _ => raise @alert.fatal(IllegalParameter)
+  }
+}
+
+///|
+/// The application protocol to settle on, this server's preference winning (RFC 7301 §3.2). A
+/// client that offers ALPN with nothing in common gets no_application_protocol.
+fn Conn::pick_alpn(
+  self : Conn,
+  config : Server,
+  hello : @msg.Hello,
+) -> String? raise @alert.Alert {
+  guard @ext.find(hello.extensions[:], Alpn) is Some(e) &&
+    config.alpn.length() > 0 else {
+    return None
+  }
+  let wanted = @alert.decoded(@ext.read_protocols(e.data[:]))
+  guard config.alpn.iter().find_first(p => wanted.contains(p)) is Some(p) else {
+    raise @alert.fatal(NoApplicationProtocol)
+  }
+  self.alpn = Some(p)
+  Some(p)
+}
+
+///|
+/// The cookie a ClientHello carries in its `cookie` extension (RFC 8446 §4.2.2), or `None` when it
+/// has no extension — which RFC 9147 §5.1 says is the first hello and only the first. One that is
+/// there but unreadable is refused where it is read, as a decode_error.
+fn echoes_cookie(hello : @msg.Hello) -> Bytes? raise @alert.Alert {
+  match @ext.find(hello.extensions[:], Cookie) {
+    Some(e) => Some(@alert.decoded(@ext.read_cookie(e.data[:])))
+    None => None
+  }
+}
+
+///|
+/// The `legacy_session_id` a ServerHello echoes: the client's on a stream, and nothing at all over
+/// a datagram — DTLS has no compatibility mode, and RFC 9147 §5 forbids a server to echo it.
+fn echoed_id(conn : Conn, hello : @msg.Hello) -> BytesView {
+  if conn.datagram {
+    b""[:]
+  } else {
+    hello.session_id[:]
+  }
+}
+
+///|
+/// RFC 8446 §4.1.2: the ClientHello after a HelloRetryRequest is the first one again, in the same
+/// order, but for a new key_share, no early_data, a cookie, an updated pre_shared_key and
+/// different padding.
+///
+/// The first one is in its wire form, so it is read back with the same framing it was written
+/// with — which over a datagram includes the cookie field DTLS puts there.
+fn Conn::same_hello(
+  self : Conn,
+  first_raw : Bytes,
+  second : @msg.Hello,
+) -> Bool {
+  guard @msg.read_hello(first_raw[4:], cookie=self.legacy_datagram)
+    is Some(first) else {
+    return false
+  }
+  let kept = (h : @msg.Hello) => {
+    h.extensions.filter(e => {
+      !(e.kind is (KeyShare | EarlyData | Cookie | PreSharedKey | Padding))
+    })
+  }
+  first.version == second.version &&
+  first.random == second.random &&
+  first.session_id == second.session_id &&
+  first.suites == second.suites &&
+  first.compression == second.compression &&
+  kept(first) == kept(second)
+}

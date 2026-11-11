@@ -251,6 +251,12 @@ if !caps.notifications {
 }
 ```
 
+`moonsqls` reaches SQL Server over TDS: `SqlServerConn::connect` negotiates encryption in
+prelogin, runs the handshake through `moontls`, and binds `?` parameters through an RPC to
+`sp_executesql` (they become `@p1`, `@p2`, never text). Two things are its own: TLS carries
+the whole TDS packet once it is on, and a transaction's descriptor has to be repeated on
+every request inside it — both handled for you, but worth knowing when reading a trace.
+
 `moonduckdb` is the embedded analytical engine: `Driver`, a `Duckdb` dialect, real
 transactions, no savepoints, and the engine loaded at run time — `MOONDUCKDB_LIBRARY`
 points at `libduckdb.so` or `duckdb.dll`, and `drivers/duckdb/scripts/fetch_engine.sh`

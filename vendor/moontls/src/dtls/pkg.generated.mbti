@@ -1,0 +1,279 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moontls/dtls"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitstack/mooncred/x509",
+  "moonbitstack/mooncrypt/spec",
+  "moonbitstack/moontls/alert",
+  "moonbitstack/moontls/hs",
+  "moonbitstack/moontls/keys",
+  "moonbitstack/moontls/msg",
+  "moonbitstack/moontls/record",
+  "moonbitstack/moontls/srtp",
+  "moonbitstack/moontls/tls",
+}
+
+// Values
+pub fn ack(ArrayView[Number]) -> Bytes raise @alert.Alert
+
+pub fn aead_of(@record.Suite) -> (Bytes) -> &@spec.Aead
+
+pub fn aes_mask(Bytes, BytesView) -> Bytes
+
+pub let application : UInt64
+
+pub fn chacha_mask(Bytes, BytesView) -> Bytes
+
+pub fn decode(BytesView) -> (@record.Kind, Number, Bytes, Int32)? raise @alert.Alert
+
+pub let early : UInt64
+
+pub fn encode(@record.Kind, Number, BytesView) -> Bytes raise @alert.Alert
+
+pub let handshake : UInt64
+
+pub let handshake_header : Int32
+
+pub let header12 : Int32
+
+pub let legacy_version : Int32
+
+pub fn mask_of(@record.Suite) -> (Bytes, BytesView) -> Bytes
+
+pub let max_plaintext_seq : UInt64
+
+pub fn measure(Byte, Int32) -> (Int32, Int32, Bool)?
+
+pub fn open13(BytesView, BytesView, BytesView) -> (Bytes, Int32?)?
+
+pub fn piece(Piece) -> Bytes raise @alert.Alert
+
+pub fn pieces(BytesView, seq~ : Int32, room~ : Int32) -> Array[Piece] raise @alert.Alert
+
+pub let plain : UInt64
+
+pub let plaintext_header : Int32
+
+pub fn read_ack(BytesView) -> Array[Number]?
+
+pub fn read_piece(BytesView) -> (Piece, Int32)? raise @alert.Alert
+
+pub fn seal13(BytesView, BytesView, BytesView, Int32?) -> Bytes
+
+pub fn shape(Byte) -> Shape
+
+pub let shell : Shell
+
+pub fn sn_key(BytesView, digest? : @keys.Digest, len? : Int32) -> Bytes
+
+pub let tls_header : Int32
+
+pub let window : Int32
+
+// Errors
+
+// Types and methods
+type Carried
+
+pub struct Cipher {
+  epoch : UInt64
+  traffic : @record.Traffic
+  sn : Bytes
+  mut seq : UInt64
+  seen : Window
+  aead : (Bytes) -> &@spec.Aead
+  mask : (Bytes, BytesView) -> Bytes
+}
+pub fn Cipher::epoch(Self) -> UInt64
+pub fn Cipher::new(BytesView, epoch~ : UInt64, digest? : @keys.Digest, aead? : (Bytes) -> &@spec.Aead, mask? : (Bytes, BytesView) -> Bytes, window? : Int32, len? : Int32) -> Self
+pub fn Cipher::next(Self) -> Number
+pub fn Cipher::open(Self, BytesView, cid? : Int32) -> (@record.Kind, Bytes, Number, Int32) raise @alert.Alert
+pub fn Cipher::seal(Self, @record.Kind, BytesView, shape? : Shell, padding? : Int32) -> Bytes raise @alert.Alert
+
+pub struct Cipher12 {
+  suite : @record.Suite12
+  inner : @record.Cipher
+  epoch : UInt64
+  mut seq : UInt64
+  seen : Window
+}
+pub fn Cipher12::epoch(Self) -> UInt64
+pub fn Cipher12::new(@record.Suite12, BytesView, BytesView, mac_key? : BytesView, etm? : Bool, rand~ : (Int32) -> Bytes, epoch~ : UInt64) -> Self
+pub fn Cipher12::open(Self, BytesView) -> (@record.Kind, Bytes, Number, Int32) raise @alert.Alert
+pub fn Cipher12::seal(Self, @record.Kind, BytesView) -> Bytes raise @alert.Alert
+
+pub struct Conn12 {
+  // private fields
+}
+pub fn Conn12::alpn(Self) -> String?
+pub fn Conn12::client(@tls.Client, String, rand~ : (Int32) -> Bytes, now~ : Int64, wall~ : Int64) -> Self raise @alert.Alert
+pub fn Conn12::close(Self, now~ : Int64) -> Unit
+pub fn Conn12::deadline(Self) -> Int64?
+pub fn Conn12::group(Self) -> Int32?
+pub fn Conn12::is_closed(Self) -> Bool
+pub fn Conn12::is_connected(Self) -> Bool
+pub fn Conn12::peer(Self) -> Array[Bytes]
+pub fn Conn12::read(Self) -> Bytes
+pub fn Conn12::receive(Self, BytesView, now~ : Int64, peer? : BytesView) -> Unit raise @alert.Alert
+pub fn Conn12::refused(Self) -> @x509.Refused?
+pub fn Conn12::server(@tls.Server, rand~ : (Int32) -> Bytes, now~ : Int64, wall? : Int64, cookie? : Cookie) -> Self
+pub fn Conn12::server_name(Self) -> String?
+pub fn Conn12::srtp(Self) -> @srtp.Keys?
+pub fn Conn12::suite(Self) -> @record.Suite12?
+pub fn Conn12::take(Self) -> Bytes
+pub fn Conn12::tick(Self, now~ : Int64) -> Unit raise @alert.Alert
+pub fn Conn12::version(Self) -> @tls.Version?
+pub fn Conn12::write(Self, BytesView, now~ : Int64) -> Unit raise @alert.Alert
+
+pub struct Conn13 {
+  // private fields
+}
+pub fn Conn13::alpn(Self) -> String?
+pub fn Conn13::client(@tls.Client, String, rand~ : (Int32) -> Bytes, now~ : Int64, wall~ : Int64) -> Self raise @alert.Alert
+pub fn Conn13::close(Self, now~ : Int64) -> Unit
+pub fn Conn13::deadline(Self) -> Int64?
+pub fn Conn13::group(Self) -> Int32?
+pub fn Conn13::is_closed(Self) -> Bool
+pub fn Conn13::is_connected(Self) -> Bool
+pub fn Conn13::peer(Self) -> Array[Bytes]
+pub fn Conn13::read(Self) -> Bytes
+pub fn Conn13::receive(Self, BytesView, now~ : Int64, peer? : BytesView) -> Unit raise @alert.Alert
+pub fn Conn13::refused(Self) -> @x509.Refused?
+pub fn Conn13::server(@tls.Server, rand~ : (Int32) -> Bytes, now~ : Int64, wall? : Int64, cookie? : Cookie) -> Self
+pub fn Conn13::server_name(Self) -> String?
+pub fn Conn13::srtp(Self) -> @srtp.Keys?
+pub fn Conn13::suite(Self) -> @record.Suite?
+pub fn Conn13::take(Self) -> Bytes
+pub fn Conn13::tick(Self, now~ : Int64) -> Unit raise @alert.Alert
+pub fn Conn13::version(Self) -> @tls.Version?
+pub fn Conn13::write(Self, BytesView, now~ : Int64) -> Unit raise @alert.Alert
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Cookie {
+  Off
+  Key(Bytes)
+}
+pub fn Cookie::equal(Self, Self) -> Bool
+pub fn Cookie::not_equal(Self, Self) -> Bool
+pub fn Cookie::to_repr(Self) -> @debug.Repr
+
+pub struct Driver {
+  role : Role
+  mut state : State
+  transcript : @keys.Transcript
+  incoming : Flight
+  mut sending : Int32
+  out : Array[Carried]
+  seen : Array[Number]
+  mut stalled : Bool
+}
+pub fn Driver::ack(Self) -> Array[Number]
+pub fn Driver::acked(Self, ArrayView[Number]) -> Unit
+pub fn Driver::connected(Self) -> Bool
+pub fn Driver::new(Role, digest? : @keys.Digest) -> Self
+pub fn Driver::outstanding(Self) -> Array[Piece]
+pub fn Driver::role(Self) -> Role
+pub fn Driver::send(Self, BytesView, room~ : Int32) -> Array[Piece] raise @alert.Alert
+pub fn Driver::sending(Self) -> Int32
+pub fn Driver::sent(Self, Piece, Number) -> Unit
+pub fn Driver::sent_flight(Self, client_cert? : Bool) -> Unit raise @alert.Alert
+pub fn Driver::stalled(Self) -> Bool
+pub fn Driver::state(Self) -> State
+pub fn Driver::take(Self, Piece, Number) -> Array[@msg.Kind] raise @alert.Alert
+pub fn Driver::transcript(Self) -> Bytes
+
+pub struct Flight {
+  parts : Map[Int32, Partial]
+  done : Map[Int32, Bytes]
+  mut next : Int32
+}
+pub fn Flight::new(from? : Int32) -> Self
+pub fn Flight::next(Self) -> Int32
+pub fn Flight::partial(Self) -> Bool
+pub fn Flight::take(Self, Piece) -> Array[Bytes] raise @alert.Alert
+pub fn Flight::waiting(Self) -> Bool
+
+#derive(Compare, Eq, @debug.Debug)
+pub(all) struct Number {
+  epoch : UInt64
+  seq : UInt64
+}
+pub fn Number::compare(Self, Self) -> Int32
+pub fn Number::equal(Self, Self) -> Bool
+pub fn Number::not_equal(Self, Self) -> Bool
+pub fn Number::op_ge(Self, Self) -> Bool
+pub fn Number::op_gt(Self, Self) -> Bool
+pub fn Number::op_le(Self, Self) -> Bool
+pub fn Number::op_lt(Self, Self) -> Bool
+pub fn Number::to_repr(Self) -> @debug.Repr
+
+type Partial
+
+#derive(Eq, @debug.Debug)
+pub(all) struct Piece {
+  kind : Int32
+  total : Int32
+  seq : Int32
+  at : Int32
+  body : Bytes
+}
+pub fn Piece::equal(Self, Self) -> Bool
+pub fn Piece::not_equal(Self, Self) -> Bool
+pub fn Piece::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Role {
+  Client
+  Server
+}
+pub fn Role::equal(Self, Self) -> Bool
+pub fn Role::not_equal(Self, Self) -> Bool
+pub fn Role::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Shape {
+  Plain(@record.Kind)
+  Sealed
+  Foreign
+}
+pub fn Shape::equal(Self, Self) -> Bool
+pub fn Shape::not_equal(Self, Self) -> Bool
+pub fn Shape::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) struct Shell {
+  cid : Bytes
+  wide : Bool
+  length : Bool
+}
+pub fn Shell::equal(Self, Self) -> Bool
+pub fn Shell::new(cid? : Bytes, wide? : Bool, length? : Bool) -> Self
+pub fn Shell::not_equal(Self, Self) -> Bool
+pub fn Shell::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) enum State {
+  Asking(@hs.Client)
+  Answering(@hs.Server)
+}
+pub fn State::connected(Self) -> Bool
+pub fn State::equal(Self, Self) -> Bool
+pub fn State::not_equal(Self, Self) -> Bool
+pub fn State::to_repr(Self) -> @debug.Repr
+
+pub struct Window {
+  size : Int32
+  mut edge : UInt64
+  mut bits : Array[Bool]
+  mut started : Bool
+}
+pub fn Window::accept(Self, UInt64) -> Bool
+pub fn Window::expand(Self, UInt64, Int32) -> UInt64
+pub fn Window::high(Self) -> UInt64?
+pub fn Window::new(size? : Int32) -> Self
+pub fn Window::seen(Self, UInt64) -> Bool
+
+// Type aliases
+
+// Traits

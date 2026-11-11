@@ -1,0 +1,53 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moontls/srtp"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitstack/moontls/keys",
+}
+
+// Values
+pub fn keys(BytesView, Profile, digest? : @keys.Digest) -> Keys
+
+pub fn keys12(BytesView, BytesView, BytesView, Profile, digest? : @keys.Digest) -> Keys
+
+pub let label : Bytes
+
+pub fn select(ArrayView[Int32], supported? : ArrayView[Profile]) -> Profile?
+
+pub let supported : Array[Profile]
+
+// Errors
+
+// Types and methods
+#derive(Eq, @debug.Debug)
+pub(all) struct Keys {
+  client_key : Bytes
+  server_key : Bytes
+  client_salt : Bytes
+  server_salt : Bytes
+}
+pub fn Keys::equal(Self, Self) -> Bool
+pub fn Keys::not_equal(Self, Self) -> Bool
+pub fn Keys::to_repr(Self) -> @debug.Repr
+
+#derive(Eq, @debug.Debug)
+pub(all) enum Profile {
+  Aes128CmSha1Tag80
+  Aes128CmSha1Tag32
+  NullSha1Tag80
+  NullSha1Tag32
+  Aead128Gcm
+  Aead256Gcm
+}
+pub fn Profile::code(Self) -> Int32
+pub fn Profile::equal(Self, Self) -> Bool
+pub fn Profile::key_size(Self) -> Int32
+pub fn Profile::not_equal(Self, Self) -> Bool
+pub fn Profile::of(Int32) -> Self?
+pub fn Profile::salt_size(Self) -> Int32
+pub fn Profile::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits

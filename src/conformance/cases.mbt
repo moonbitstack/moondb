@@ -182,10 +182,10 @@ async fn case_savepoint(
 ) -> Unit raise @moondb.DbError {
   conn.begin()
   conn.execute(probe.insert, probe_values(41)) |> ignore
-  conn.execute(savepoint("cf"), []) |> ignore
+  conn.execute(savepoint(probe.dialect, "cf"), []) |> ignore
   conn.execute(probe.insert, probe_values(42)) |> ignore
-  conn.execute(rollback_to_savepoint("cf"), []) |> ignore
-  conn.execute(release_savepoint("cf"), []) |> ignore
+  conn.execute(rollback_to_savepoint(probe.dialect, "cf"), []) |> ignore
+  conn.execute(release_savepoint(probe.dialect, "cf"), []) |> ignore
   conn.commit()
   let rows = conn.query(probe.count, [@moondb.Int(41), @moondb.Int(42)])
   expect_int(rows[0].values[0], 1L, "rows kept around a savepoint")
@@ -243,7 +243,7 @@ fn expect_integrity_violation(
       )
     // DuckDB classifies the violation itself but has no SQLSTATE to quote: its answer
     // is `Constraint Error: Duplicate key …`, which is a class of its own.
-    Duckdb =>
+    Duckdb | Sqlserver =>
       expect(
         e.kind() == @moondb.ErrorKind::Integrity,
         "a duplicate key was classified " +
@@ -286,7 +286,7 @@ fn expect_programming_error(
       )
     // ClickHouse reports a parser error as a `Server` error with its own code, which
     // the driver maps onto `Programming`; there is no SQLSTATE to quote.
-    Clickhouse | Duckdb =>
+    Clickhouse | Duckdb | Sqlserver =>
       expect(
         e.kind() == @moondb.ErrorKind::Programming,
         "a malformed statement was classified " +

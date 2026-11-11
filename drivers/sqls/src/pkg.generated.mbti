@@ -1,0 +1,63 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moonsqls"
+
+import {
+  "moonbitlang/async/socket",
+  "moonbitstack/moondb",
+  "moonbitstack/moontls/tls",
+}
+
+// Values
+pub fn permissive_tls() -> @tls.Client
+
+// Errors
+
+// Types and methods
+pub struct SqlServerConn {
+  wire : TdsWire
+  mut closed : Bool
+  database : String
+  mut txn : Bytes
+}
+pub async fn SqlServerConn::begin(Self) -> Unit raise @moondb.DbError
+pub fn SqlServerConn::capabilities(Self) -> @moondb.Capabilities
+pub async fn SqlServerConn::close(Self) -> Unit
+pub async fn SqlServerConn::commit(Self) -> Unit raise @moondb.DbError
+pub async fn SqlServerConn::connect(String, Int32, String, String, String, encrypt? : Bool, tls? : @tls.Client) -> Self raise @moondb.DbError
+pub fn SqlServerConn::database(Self) -> String
+pub fn SqlServerConn::dialect(Self) -> @moondb.Dialect
+pub async fn SqlServerConn::execute(Self, String, Array[@moondb.Value]) -> @moondb.ExecResult raise @moondb.DbError
+pub async fn SqlServerConn::ping(Self) -> Bool
+pub async fn SqlServerConn::prepare(Self, String) -> &@moondb.AsyncStmt raise @moondb.DbError
+pub async fn SqlServerConn::query(Self, String, Array[@moondb.Value]) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn SqlServerConn::query_stream(Self, String, Array[@moondb.Value]) -> &@moondb.AsyncCursor raise @moondb.DbError
+pub async fn SqlServerConn::rollback(Self) -> Unit raise @moondb.DbError
+pub impl @moondb.AsyncDriver for SqlServerConn
+
+pub struct SqlServerStmt {
+  conn : SqlServerConn
+  sql : String
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}
+pub async fn SqlServerStmt::bind(Self, Array[@moondb.Value]) -> Unit raise @moondb.DbError
+pub async fn SqlServerStmt::bind_named(Self, Map[String, @moondb.Value]) -> Unit raise @moondb.DbError
+pub async fn SqlServerStmt::close(Self) -> Unit
+pub async fn SqlServerStmt::execute(Self) -> @moondb.ExecResult raise @moondb.DbError
+pub fn SqlServerStmt::new(SqlServerConn, String) -> Self
+pub fn SqlServerStmt::params(Self) -> Array[String]
+pub async fn SqlServerStmt::query(Self) -> Array[@moondb.Row] raise @moondb.DbError
+pub async fn SqlServerStmt::query_stream(Self) -> &@moondb.AsyncCursor raise @moondb.DbError
+pub fn SqlServerStmt::sql(Self) -> String
+pub impl @moondb.AsyncStmt for SqlServerStmt
+
+pub struct TdsWire {
+  sock : @socket.Tcp
+  mut tls : @tls.Conn?
+  mut pending : Bytes
+  mut packet_id : Int32
+}
+
+// Type aliases
+
+// Traits
