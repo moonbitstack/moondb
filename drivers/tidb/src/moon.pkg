@@ -1,0 +1,17 @@
+// moontidb: TiDB under the moondb contract. TiDB speaks MySQL's wire protocol and most
+// of its SQL, so the statements travel through moonmysql unchanged; what differs is the
+// server behind them, and that is what this package answers.
+supported_targets = "native"
+
+import {
+  "moonbitstack/moondb",
+  "moonbitstack/moonmysql/client",
+  "moonbitstack/moontls/tls",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+  "moonbitstack/moondb/conformance",
+} for "test"

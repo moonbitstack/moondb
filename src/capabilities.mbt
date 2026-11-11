@@ -35,6 +35,10 @@ pub(all) struct Capabilities {
   server_cursors : Bool
   /// `COPY` in both directions is streamed chunk by chunk.
   streaming_copy : Bool
+  /// `LISTEN` / `NOTIFY` exist, so a subscriber can wait for a change instead of
+  /// polling for one. PostgreSQL has them; the servers that speak its protocol do
+  /// not all do, which is why each such driver reports its own answer.
+  notifications : Bool
   /// `begin` / `commit` / `rollback` bracket real work. An engine without
   /// transactions accepts the calls and does nothing, so a query layer must know
   /// before it wraps a multi-statement unit of work in one.
@@ -60,6 +64,7 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: false,
         streaming_copy: false,
+        notifications: false,
         transactions: true,
         savepoints: true,
         multiple_result_sets: false,
@@ -73,6 +78,7 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: true,
         streaming_copy: true,
+        notifications: true,
         transactions: true,
         savepoints: true,
         multiple_result_sets: true,
@@ -86,6 +92,7 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: false,
         streaming_copy: false,
+        notifications: false,
         transactions: true,
         savepoints: true,
         multiple_result_sets: true,
@@ -96,6 +103,23 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
     // transactions to nest and no server-side cursor to hold open. What it does have
     // is anonymous (`?`) binding, which its driver rewrites into its own parameter
     // syntax, and 64-bit unsigned columns.
+    // DuckDB is an embedded analytical engine with real transactions and no
+    // savepoints; it has `RETURNING` and unsigned 64-bit columns, and one statement
+    // still returns one result set.
+    Duckdb =>
+      {
+        dialect,
+        prepared_statements: true,
+        named_parameters: true,
+        server_cursors: false,
+        streaming_copy: false,
+        notifications: false,
+        transactions: true,
+        savepoints: false,
+        multiple_result_sets: false,
+        unsigned_integers: true,
+        returning: true,
+      }
     Clickhouse =>
       {
         dialect,
@@ -103,6 +127,7 @@ pub fn Capabilities::for_dialect(dialect : Dialect) -> Capabilities {
         named_parameters: true,
         server_cursors: false,
         streaming_copy: false,
+        notifications: false,
         transactions: false,
         savepoints: false,
         multiple_result_sets: false,
@@ -127,6 +152,7 @@ pub fn Capabilities::count(self : Capabilities) -> Int32 {
     self.named_parameters,
     self.server_cursors,
     self.streaming_copy,
+    self.notifications,
     self.transactions,
     self.savepoints,
     self.multiple_result_sets,

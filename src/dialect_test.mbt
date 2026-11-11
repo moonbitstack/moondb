@@ -45,7 +45,7 @@ test "capability presets follow the dialect" {
 ///|
 test "capability count is the number of flags that are on" {
   let pg = @moondb.Capabilities::for_dialect(@moondb.Dialect::Postgres)
-  assert_eq(pg.count(), 8)
+  assert_eq(pg.count(), 9)
   let lite = @moondb.Capabilities::for_dialect(@moondb.Dialect::Sqlite)
   assert_eq(lite.count(), 5)
 }

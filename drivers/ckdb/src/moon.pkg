@@ -1,0 +1,19 @@
+// moonckdb: CockroachDB under the moondb contract. The server speaks PostgreSQL's
+// wire protocol, so there is no second protocol implementation here — this package is
+// the layer that says *which* server answered, and what that server can actually do,
+// because those two answers differ from PostgreSQL's even though the bytes on the wire
+// do not.
+supported_targets = "native"
+
+import {
+  "moonbitstack/moondb",
+  "moonbitstack/moonpostgres",
+  "moonbitstack/moontls/tls",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+  "moonbitstack/moondb/conformance",
+} for "test"

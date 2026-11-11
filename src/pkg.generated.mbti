@@ -92,6 +92,7 @@ pub(all) struct Capabilities {
   named_parameters : Bool
   server_cursors : Bool
   streaming_copy : Bool
+  notifications : Bool
   transactions : Bool
   savepoints : Bool
   multiple_result_sets : Bool
@@ -110,6 +111,7 @@ pub(all) enum Dialect {
   Postgres
   Mysql
   Clickhouse
+  Duckdb
 }
 pub fn Dialect::equal(Self, Self) -> Bool
 pub fn Dialect::name(Self) -> String

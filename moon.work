@@ -2,6 +2,9 @@ members = [
   ".",
   "./drivers/mysql",
   "./drivers/postgres",
-  "./drivers/clickhouse",
+  "./drivers/chdb",
+  "./drivers/ckdb",
+  "./drivers/tidb",
+  "./drivers/duckdb",
   "./drivers/sqlite",
 ]

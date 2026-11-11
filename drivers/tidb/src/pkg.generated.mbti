@@ -1,0 +1,35 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitstack/moontidb"
+
+import {
+  "moonbitstack/moondb",
+  "moonbitstack/moonmysql/client",
+  "moonbitstack/moontls/tls",
+}
+
+// Values
+pub fn capabilities_for(Server) -> @moondb.Capabilities
+
+pub async fn connect(String, Int32, String, String, String, tls? : @tls.Client) -> @client.MysqlConn
+
+pub async fn server_of(@client.MysqlConn) -> Server raise @moondb.DbError
+
+pub async fn version(@client.MysqlConn) -> String raise @moondb.DbError
+
+// Errors
+
+// Types and methods
+#derive(Eq)
+pub(all) enum Server {
+  Mysql
+  Mariadb
+  Tidb
+}
+pub fn Server::equal(Self, Self) -> Bool
+pub fn Server::from_version(String) -> Self
+pub fn Server::name(Self) -> String
+pub fn Server::not_equal(Self, Self) -> Bool
+
+// Type aliases
+
+// Traits

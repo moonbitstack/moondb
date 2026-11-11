@@ -46,13 +46,16 @@
 <a href="#moonmysql">moonmysql<span class="n">75</span></a>
 <a href="#moonmysql-client">client<span class="n">33</span></a>
 <a href="#moonchdb">moonchdb<span class="n">15</span></a>
+<a href="#moonckdb">moonckdb<span class="n">7</span></a>
+<a href="#moontidb">moontidb<span class="n">7</span></a>
+<a href="#moonduckdb">moonduckdb<span class="n">25</span></a>
       </aside>
 
       <div>
         <section class="hero" style="padding-top:var(--s5)">
           <p class="folio">API · generated</p>
           <h1 style="font-size:clamp(30px,4vw,46px)">The interface</h1>
-          <p class="lede">455 declarations across 10 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
+          <p class="lede">494 declarations across 13 packages — the contract and the three drivers that ratify it — read out of <code class="inline">pkg.generated.mbti</code> and described from the <code class="inline">///</code> docs in the sources.</p>
         </section>
 <section class="section first" id="moondb">
 <p class="folio">moonbitstack/moondb</p>
@@ -129,6 +132,7 @@ tx.driver().execute("INSERT INTO hero VALUES ($1, $2)", [Int(1), Text("Nova")])
   named_parameters : Bool
   server_cursors : Bool
   streaming_copy : Bool
+  notifications : Bool
   transactions : Bool
   savepoints : Bool
   multiple_result_sets : Bool
@@ -151,6 +155,7 @@ tx.driver().execute("INSERT INTO hero VALUES ($1, $2)", [Int(1), Text("Nova")])
   Postgres
   Mysql
   Clickhouse
+  Duckdb
 }</pre></div>
 <div class="entry"><pre class="signature">pub(open) trait Driver {
   fn execute(Self, String, Array[Value]) -&gt; ExecResult raise DbError
@@ -957,6 +962,78 @@ let rows = db.query("SELECT name FROM hero WHERE id = ?", [Int(1)])</code></pre>
 <div class="entry"><pre class="signature">pub async fn ClickHouseConn::query(Self, String, Array[@moondb.Value]) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p>Run a row-returning statement and materialise the result.</p></div></div>
 <div class="entry"><pre class="signature">pub async fn ClickHouseConn::query_stream(Self, String, Array[@moondb.Value]) -&gt; &amp;@moondb.AsyncCursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.AsyncDriver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
 <div class="entry"><pre class="signature">pub fn ClickHouseConn::rollback(Self) -&gt; Unit raise @moondb.DbError</pre></div>
+</section>
+<section class="section" id="moonckdb">
+<p class="folio">moonbitstack/moonckdb</p>
+<h2>moonckdb</h2>
+<h3>Types <span class="count">1</span></h3>
+<div class="entry"><pre class="signature">pub(all) enum Server {
+  Postgres
+  Cockroach
+}</pre></div>
+<h3>Functions &amp; methods <span class="count">6</span></h3>
+<div class="entry"><pre class="signature">pub fn capabilities_for(Server) -&gt; @moondb.Capabilities</pre><div class="doc"><p>What <em>this server</em> can do, as opposed to what the driver implements. <code class="inline">@moondb.Capabilities::for_dialect</code> describes the PostgreSQL implementation; CockroachDB is not PostgreSQL, and the difference that matters to a caller is <code class="inline">notifications</code>: <code class="inline">LISTEN</code> and <code class="inline">NOTIFY</code> do not exist there, so a query layer that plans to wait for a notification has to poll instead.</p><p>The rest of the PostgreSQL surface does hold on CockroachDB — cursors, savepoints, <code class="inline">COPY</code> in both directions, <code class="inline">RETURNING</code> — which is why this clears one flag and not a row of them.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn connect(String, Int32, String, String, String, tls? : @tls.Client) -&gt; @moonpostgres.PgConn raise @moondb.DbError</pre><div class="doc"><p>Connect the way <code class="inline">@moonpostgres.PgConn::connect</code> does — the protocol is the same one, and there is nothing to translate.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Server::from_version(String) -&gt; Self</pre><div class="doc"><p>The server a <code class="inline">SELECT version()</code> answer names. CockroachDB reports itself as <code class="inline">CockroachDB CCL v24.3.0 (x86_64-…, built …)</code>, PostgreSQL as <code class="inline">PostgreSQL 16.4 …</code>, and a compatibility layer that borrows the string is still that layer.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Server::name(Self) -&gt; String</pre></div>
+<div class="entry"><pre class="signature">pub async fn server_of(&amp;@moondb.AsyncDriver) -&gt; Server raise @moondb.DbError</pre><div class="doc"><p>Which server is behind this connection, asked rather than assumed.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn version(&amp;@moondb.AsyncDriver) -&gt; String raise @moondb.DbError</pre><div class="doc"><p>The server's own version sentence, as it answered.</p></div></div>
+</section>
+<section class="section" id="moontidb">
+<p class="folio">moonbitstack/moontidb</p>
+<h2>moontidb</h2>
+<h3>Types <span class="count">1</span></h3>
+<div class="entry"><pre class="signature">pub(all) enum Server {
+  Mysql
+  Mariadb
+  Tidb
+}</pre></div>
+<h3>Functions &amp; methods <span class="count">6</span></h3>
+<div class="entry"><pre class="signature">pub fn capabilities_for(Server) -&gt; @moondb.Capabilities</pre><div class="doc"><p>What <em>this server</em> can do, as opposed to what the driver implements. <code class="inline">@moondb.Capabilities::for_dialect</code> describes the PostgreSQL implementation; CockroachDB is not PostgreSQL, and the difference that matters to a caller is <code class="inline">notifications</code>: <code class="inline">LISTEN</code> and <code class="inline">NOTIFY</code> do not exist there, so a query layer that plans to wait for a notification has to poll instead.</p><p>The rest of the PostgreSQL surface does hold on CockroachDB — cursors, savepoints, <code class="inline">COPY</code> in both directions, <code class="inline">RETURNING</code> — which is why this clears one flag and not a row of them.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn connect(String, Int32, String, String, String, tls? : @tls.Client) -&gt; @client.MysqlConn</pre><div class="doc"><p>Connect the way <code class="inline">@moonpostgres.PgConn::connect</code> does — the protocol is the same one, and there is nothing to translate.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Server::from_version(String) -&gt; Self</pre><div class="doc"><p>The server a <code class="inline">SELECT version()</code> answer names. CockroachDB reports itself as <code class="inline">CockroachDB CCL v24.3.0 (x86_64-…, built …)</code>, PostgreSQL as <code class="inline">PostgreSQL 16.4 …</code>, and a compatibility layer that borrows the string is still that layer.</p></div></div>
+<div class="entry"><pre class="signature">pub fn Server::name(Self) -&gt; String</pre></div>
+<div class="entry"><pre class="signature">pub async fn server_of(@client.MysqlConn) -&gt; Server raise @moondb.DbError</pre><div class="doc"><p>Which server is behind this connection, asked rather than assumed.</p></div></div>
+<div class="entry"><pre class="signature">pub async fn version(@client.MysqlConn) -&gt; String raise @moondb.DbError</pre><div class="doc"><p>The server's own version sentence, as it answered.</p></div></div>
+</section>
+<section class="section" id="moonduckdb">
+<p class="folio">moonbitstack/moonduckdb</p>
+<h2>moonduckdb</h2>
+<h3>Types <span class="count">2</span></h3>
+<div class="entry"><pre class="signature">pub struct DuckdbDriver {
+  handle : Int64
+  mut closed : Bool
+}</pre><div class="doc"><p>A live connection to a DuckDB database, embedded in the process and reached through its C API. Open it with <code class="inline">DuckdbDriver::open</code>; it implements <code class="inline">@moondb.Driver</code>, so a query layer written for SQLite or PostgreSQL drives it unchanged.</p><p>The engine itself is not linked in: the stub loads the released shared library on the first call, which is what keeps this package a single small C file instead of a twenty-megabyte C++ build. <code class="inline">MOONDUCKDB_LIBRARY</code> names the library when the loader's default search does not find it.</p></div></div>
+<div class="entry"><pre class="signature">pub struct DuckdbStmt {
+  handle : Int64
+  sql : String
+  mut params : Array[@moondb.Value]
+  mut closed : Bool
+}</pre><div class="doc"><p>A statement DuckDB prepared once. DuckDB's <code class="inline">PREPARE</code> survives across runs, so a repeated <code class="inline">INSERT</code> binds new values to the same plan instead of being parsed again — which for an analytical engine is where most of the per-statement cost sits.</p></div></div>
+<h3>Functions &amp; methods <span class="count">23</span></h3>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::begin(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">begin</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::capabilities(Self) -&gt; @moondb.Capabilities</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">capabilities</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::commit(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">commit</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::dialect(Self) -&gt; @moondb.Dialect</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">dialect</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::exec_script(Self, String) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p>A semicolon-separated script, run as one call — for a schema block, where the statement-by-statement path would be a statement per line.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::execute(Self, String, Array[@moondb.Value]) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::is_closed(Self) -&gt; Bool</pre><div class="doc"><p>Whether <code class="inline">close</code> has been called.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::open(String) -&gt; Self raise @moondb.DbError</pre><div class="doc"><p>Open (or create) the database at <code class="inline">path</code>. Use <code class="inline">":memory:"</code> for a private in-memory database. Raises <code class="inline">@moondb.ConnectError</code> when the library cannot be loaded — the message says which name was looked for — or when the file cannot be opened.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::ping(Self) -&gt; Bool</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">ping</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::prepare(Self, String) -&gt; &amp;@moondb.Stmt raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">prepare</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::query(Self, String, Array[@moondb.Value]) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::query_stream(Self, String, Array[@moondb.Value]) -&gt; &amp;@moondb.Cursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbDriver::rollback(Self) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Driver</code>'s <code class="inline">rollback</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::bind(Self, Array[@moondb.Value]) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">bind</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::bind_named(Self, Map[String, @moondb.Value]) -&gt; Unit raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">bind_named</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::close(Self) -&gt; Unit</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">close</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::execute(Self) -&gt; @moondb.ExecResult raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">execute</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::new(Int64, String) -&gt; Self raise @moondb.DbError</pre><div class="doc"><p>Prepare <code class="inline">sql</code> on <code class="inline">connection</code>.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::params(Self) -&gt; Array[String]</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">params</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::query(Self) -&gt; Array[@moondb.Row] raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">query</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::query_stream(Self) -&gt; &amp;@moondb.Cursor raise @moondb.DbError</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">query_stream</code>, callable on the value directly.</p></div></div>
+<div class="entry"><pre class="signature">pub fn DuckdbStmt::sql(Self) -&gt; String</pre><div class="doc"><p><code class="inline">@moondb.Stmt</code>'s <code class="inline">sql</code>, callable on the value directly.</p></div></div>
 </section>
         <div class="cta">
           <a class="btn primary" href="guide.html">Implement a driver</a>

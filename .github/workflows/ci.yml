@@ -568,11 +568,11 @@ jobs:
   # is what runs here; the driver's own PostgreSQL tests cover COPY, LISTEN/NOTIFY and
   # server cursors, which these servers do not implement (see drivers/postgres/README.md).
   cockroachdb:
-    name: moonpostgres (native, live CockroachDB)
+    name: moonckdb (native, live CockroachDB)
     runs-on: ubuntu-26.04
     defaults:
       run:
-        working-directory: drivers/postgres
+        working-directory: drivers/ckdb
     steps:
       - uses: actions/checkout@v7
         with:
@@ -613,13 +613,56 @@ jobs:
 
       - name: moon test (the shared matrix against live CockroachDB)
         env:
-          MOON_PG_TEST: "1"
-          PGHOST: 127.0.0.1
-          PGPORT: "26257"
-          PGUSER: root
-          PGPASSWORD: ""
-          PGDATABASE: test
-        run: moon test --target native src/conformance_integration_wbtest.mbt
+          CKDB_TEST: "1"
+          CKDB_HOST: 127.0.0.1
+          CKDB_PORT: "26257"
+          CKDB_USER: root
+          CKDB_PASSWORD: ""
+          CKDB_DB: defaultdb
+        run: moon test --target native
+
+      - name: lint (fmt is clean)
+        run: |
+          moon fmt && git diff --exit-code
+
+  # An embedded analytical engine, loaded at run time: the job fetches the pinned
+  # release rather than compiling a twenty-megabyte C++ amalgamation, which is also what
+  # a user of this driver does.
+  duckdb:
+    name: moonduckdb (native, fetched engine)
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: drivers/duckdb
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: install moon
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: post install
+        run: |
+          moon version --all
+          moon update
+
+      - name: fetch the DuckDB engine
+        run: |
+          engine=$(sh scripts/fetch_engine.sh | tail -1)
+          echo "MOONDUCKDB_LIBRARY=$engine" >> $GITHUB_ENV
+          echo "engine: $engine"
+
+      - name: moon check
+        run: moon check --target all --deny-warn
+
+      - name: moon build
+        run: moon build --target all
+
+      - name: moon test (the shared matrix against the real engine)
+        run: moon test --target native
 
       - name: lint (fmt is clean)
         run: |
@@ -628,12 +671,12 @@ jobs:
   # An analytical engine, reached over its HTTP interface: no transactions, no
   # cursors, no prepared statements — the shared matrix records those as skipped and
   # asserts everything the contract does require.
-  clickhouse:
-    name: moonclickhouse (native, live ClickHouse)
+  chdb:
+    name: moonchdb (native, live ClickHouse)
     runs-on: ubuntu-26.04
     defaults:
       run:
-        working-directory: drivers/clickhouse
+        working-directory: drivers/chdb
     steps:
       - uses: actions/checkout@v7
         with:
@@ -775,11 +818,11 @@ jobs:
   # driver also offers (no COPY, no server cursor), and its own dialect on top. Same
   # protocol, same contract — so the same conformance matrix.
   tidb:
-    name: moonmysql (native, live TiDB)
+    name: moontidb (native, live TiDB)
     runs-on: ubuntu-26.04
     defaults:
       run:
-        working-directory: drivers/mysql
+        working-directory: drivers/tidb
     steps:
       - uses: actions/checkout@v7
         with:
@@ -820,13 +863,13 @@ jobs:
 
       - name: moon test (the shared matrix against live TiDB)
         env:
-          MYSQL_TEST: "1"
-          MYSQL_HOST: "127.0.0.1"
-          MYSQL_PORT: "4000"
-          MYSQL_USER: "root"
-          MYSQL_PASSWORD: ""
-          MYSQL_DB: "test"
-        run: moon test --target native src/client/conformance_integration_test.mbt
+          TIDB_TEST: "1"
+          TIDB_HOST: "127.0.0.1"
+          TIDB_PORT: "4000"
+          TIDB_USER: "root"
+          TIDB_PASSWORD: ""
+          TIDB_DB: "test"
+        run: moon test --target native
 
       - name: lint (fmt is clean)
         run: |
