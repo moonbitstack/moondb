@@ -110,6 +110,7 @@ jobs:
       # The js backend loads SQLite's own WebAssembly build instead of linking the
       # amalgamation. It is fetched, not committed, and the same driver runs on it.
       - name: fetch the SQLite wasm engine
+        shell: bash
         run: |
           dist=$(sh scripts/fetch_engine.sh | tail -1)
           echo "MOONSQLITE_ENGINE=$dist" >> $GITHUB_ENV
@@ -672,6 +673,7 @@ jobs:
       # The js backend runs DuckDB's WebAssembly build, which is a second engine: fetched
       # the same way, from the same pinned version, and never part of the package.
       - name: fetch the DuckDB wasm engine
+        shell: bash
         run: |
           dist=$(sh scripts/fetch_wasm_engine.sh | tail -1)
           echo "MOONDUCKDB_ENGINE=$dist" >> $GITHUB_ENV
