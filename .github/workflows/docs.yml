@@ -41,9 +41,12 @@ jobs:
           moon update
 
       - name: Generate .mbti for every package the API page lists
+        # `drivers/duckdb` and `drivers/sqlite` are here for a second reason as well: the
+        # page marks a declaration that a backend spells differently, and the generator
+        # reads that from `moon info --target all` in those two modules.
         run: |
           moon info --target js
-          for m in drivers/sqlite drivers/postgres drivers/mysql; do
+          for m in drivers/sqlite drivers/postgres drivers/mysql drivers/duckdb; do
             (cd "$m" && moon update && moon info --target js)
           done
 
