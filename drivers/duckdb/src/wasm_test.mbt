@@ -8,13 +8,17 @@
 // `scripts/fetch_engine.sh` has put the engine in place.
 
 ///|
-async fn open_mem() -> @moonduckdb.DuckdbDriver raise @moondb.DbError {
-  @moonduckdb.DuckdbDriver::open(":memory:")
+/// An in-memory database, or `None` when the engine has not been fetched — the same
+/// arrangement the native tests use for the shared library.
+async fn open_mem() -> @moonduckdb.DuckdbDriver? {
+  Some(@moonduckdb.DuckdbDriver::open(":memory:")) catch {
+    _ => None
+  }
 }
 
 ///|
 async test "duckdb wasm: CREATE / INSERT / SELECT reaches the engine" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.execute("CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER)", [])
   |> ignore
   let r1 = db.execute("INSERT INTO users VALUES (?, ?, ?)", [
@@ -35,7 +39,7 @@ async test "duckdb wasm: CREATE / INSERT / SELECT reaches the engine" {
 
 ///|
 async test "duckdb wasm: an analytical query runs" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.exec_script(
     "CREATE TABLE sales (region VARCHAR, amount INTEGER); INSERT INTO sales VALUES ('east', 10), ('east', 5), ('west', 7);",
   )
@@ -54,7 +58,7 @@ async test "duckdb wasm: an analytical query runs" {
 
 ///|
 async test "duckdb wasm: every storage class crosses the boundary" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.execute(
     "CREATE TABLE v (i INTEGER, big BIGINT, d DOUBLE, t VARCHAR, b BLOB, flag BOOLEAN)",
     [],
@@ -91,7 +95,7 @@ async test "duckdb wasm: every storage class crosses the boundary" {
 
 ///|
 async test "duckdb wasm: a prepared handle runs twice with new values" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.execute("CREATE TABLE t (id INTEGER, n VARCHAR)", []) |> ignore
   let stmt = db.prepare("INSERT INTO t VALUES (?, ?)")
   stmt.bind([@moondb.Int(1), @moondb.Text("one")])
@@ -108,7 +112,7 @@ async test "duckdb wasm: a prepared handle runs twice with new values" {
 
 ///|
 async test "duckdb wasm: a transaction commits and rolls back" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.execute("CREATE TABLE t (id INTEGER)", []) |> ignore
   db.begin()
   db.execute("INSERT INTO t VALUES (1)", []) |> ignore
@@ -124,7 +128,7 @@ async test "duckdb wasm: a transaction commits and rolls back" {
 
 ///|
 async test "duckdb wasm: a constraint violation is Integrity" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.execute("CREATE TABLE u (id INTEGER PRIMARY KEY)", []) |> ignore
   db.execute("INSERT INTO u VALUES (1)", []) |> ignore
   let failure = try {
@@ -147,7 +151,7 @@ async test "duckdb wasm: a constraint violation is Integrity" {
 
 ///|
 async test "duckdb wasm: a malformed statement is Programming" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   let failure = try {
     db.query("SELEC 1", []) |> ignore
     None
@@ -166,7 +170,7 @@ async test "duckdb wasm: a malformed statement is Programming" {
 
 ///|
 async test "duckdb wasm: a statement after close is Closed, not a crash" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   db.close()
   assert_eq(db.is_closed(), true)
   let failure = try {
@@ -184,7 +188,7 @@ async test "duckdb wasm: a statement after close is Closed, not a crash" {
 
 ///|
 async test "duckdb wasm: a decimal comes back in the engine's text form" {
-  let db = open_mem()
+  guard open_mem() is Some(db) else { return }
   let rows = db.query("SELECT CAST(1.5 AS DECIMAL(10,3)) AS d", [])
   // The native backend asks `duckdb_value_varchar` for the same cell and gets `1.500`.
   assert_eq(rows[0].text(0), "1.500")

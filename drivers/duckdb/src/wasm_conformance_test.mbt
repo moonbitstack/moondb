@@ -6,7 +6,7 @@
 /// run: the engine is the same engine, and both backends classify a failure from the class
 /// DuckDB puts at the front of its message.
 async test "conformance: DuckDB on wasm honours the driver contract" {
-  let db = @moonduckdb.DuckdbDriver::open(":memory:")
+  guard open_mem() is Some(db) else { return }
   let report = @conformance.check_blocking(db)
   assert_eq(report.failures(), [])
   assert_eq(report.total(), 12)

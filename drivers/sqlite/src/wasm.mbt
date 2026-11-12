@@ -26,6 +26,12 @@ pub struct SqliteDriver {
 }
 
 ///|
+fn js_installed_and_present() -> Bool {
+  js_install() |> ignore
+  js_present()
+}
+
+///|
 /// Instantiate the engine, once per process, and wait for it. The first connection pays for
 /// the module; every later one finds it running.
 async fn start_engine() -> Unit raise @moondb.DbError {
@@ -45,6 +51,11 @@ async fn start_engine() -> Unit raise @moondb.DbError {
 pub async fn SqliteDriver::open(
   path : String,
 ) -> SqliteDriver raise @moondb.DbError {
+  guard js_installed_and_present() else {
+    raise @moondb.ConnectError(
+      "no SQLite wasm build found: run scripts/fetch_engine.sh, or point MOONSQLITE_ENGINE at the directory holding sqlite3.wasm",
+    )
+  }
   start_engine()
   let h = ffi_open(@utf8.encode(path))
   if h == 0L {

@@ -156,6 +156,14 @@ extern "js" fn js_install() -> JsDuckdb =
   #|
   #|   return {
   #|     start,
+  #|     present() {
+  #|       try {
+  #|         locate()
+  #|         return true
+  #|       } catch (e) {
+  #|         return false
+  #|       }
+  #|     },
   #|     open(database) {
   #|       try {
   #|         engine.open({ path: database })
@@ -316,6 +324,10 @@ extern "js" fn js_install() -> JsDuckdb =
 
 ///|
 /// Instantiate the engine, once per process. Resolves to `0` when it is ready.
+extern "js" fn js_present() -> Bool =
+  #| () => globalThis.__moondb_duckdb.present()
+
+///|
 extern "js" fn js_start() -> @js_async.Promise[Int32] =
   #| () => globalThis.__moondb_duckdb.start().then(() => 0)
 

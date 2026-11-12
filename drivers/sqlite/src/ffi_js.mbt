@@ -101,6 +101,17 @@ extern "js" fn js_install() -> JsToolkit =
   #|
   #|   return {
   #|     load,
+  #|     /* Whether a build is there at all, answered without instantiating anything: a
+  #|        caller that finds none should get a failure it can catch, not a promise that
+  #|        rejects into an event loop nobody is pumping. */
+  #|     present() {
+  #|       try {
+  #|         locate()
+  #|         return true
+  #|       } catch (e) {
+  #|         return false
+  #|       }
+  #|     },
   #|     open(filename) {
   #|       const wasm = engine.wasm
   #|       return scope(() => {
@@ -241,6 +252,10 @@ extern "js" fn js_install() -> JsToolkit =
 ///|
 /// Start the engine, or hand back the start already in flight. Resolves to `0` once the
 /// module is instantiated and `capi` can be called.
+extern "js" fn js_present() -> Bool =
+  #| () => globalThis.__moonsqlite.present()
+
+///|
 extern "js" fn js_boot() -> @js_async.Promise[Int32] =
   #| () => globalThis.__moonsqlite.load().then(() => 0)
 

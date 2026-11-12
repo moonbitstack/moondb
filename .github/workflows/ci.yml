@@ -121,8 +121,14 @@ jobs:
       - name: moon build
         run: moon build --target all
 
-      - name: moon test (native and js, real SQLite on both)
-        run: moon test --target all
+      # Two runs rather than one `--target all`: this directory is a workspace member, so
+      # an unqualified run reaches the other modules' js tests as well, and those have
+      # nothing to do with this driver.
+      - name: moon test (native, real SQLite)
+        run: moon test --target native
+
+      - name: moon test (js, the wasm engine)
+        run: moon test --target js -p moonbitstack/moonsqlite
 
       - name: lint (fmt is clean)
         run: |
@@ -677,8 +683,11 @@ jobs:
       - name: moon build
         run: moon build --target all
 
-      - name: moon test (the shared matrix against both engines)
-        run: moon test --target all
+      - name: moon test (native, the shared library)
+        run: moon test --target native
+
+      - name: moon test (js, the wasm engine)
+        run: moon test --target js -p moonbitstack/moonduckdb
 
       - name: lint (fmt is clean)
         run: |

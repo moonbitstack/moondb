@@ -18,6 +18,11 @@ pub async fn DuckdbDriver::open(
   path : String,
 ) -> DuckdbDriver raise @moondb.DbError {
   js_install() |> ignore
+  guard js_present() else {
+    raise @moondb.ConnectError(
+      "no DuckDB wasm build found: run scripts/fetch_wasm_engine.sh, or point MOONDUCKDB_ENGINE at the directory holding duckdb-node-blocking.cjs",
+    )
+  }
   try js_start().wait() |> ignore catch {
     e =>
       raise @moondb.ConnectError(

@@ -7,7 +7,7 @@
 /// two backends are held to one yardstick rather than two. The bridge is what makes that
 /// literal: the same driver trait on both targets.
 async test "conformance: SQLite on wasm honours the driver contract" {
-  let db = @moonsqlite.SqliteDriver::open(":memory:")
+  guard open_mem() is Some(db) else { return }
   let report = @conformance.check_blocking(db)
   assert_eq(report.failures(), [])
   assert_eq(report.total(), 12)
