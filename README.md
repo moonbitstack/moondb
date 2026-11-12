@@ -28,11 +28,11 @@ flowchart TD
     end
     IFACE(["<b>@moondb</b><br/><small>Value · Row · ExecResult · DbError · Driver</small>"])
     subgraph drivers["drivers — implement moondb"]
-      SQLITE["moonsqlite<br/><small>C-FFI, native</small>"]
+      SQLITE["moonsqlite<br/><small>C-FFI, native; wasm on js</small>"]
       PG["moonpostgres<br/><small>pure-MoonBit wire</small>"]
       MYSQL["moonmysql<br/><small>pure-MoonBit wire</small>"]
       CH["moonchdb<br/><small>pure-MoonBit HTTP</small>"]
-      DUCK["moonduckdb<br/><small>C-FFI, engine loaded</small>"]
+      DUCK["moonduckdb<br/><small>engine loaded; wasm on js</small>"]
       SQLS["moonsqls<br/><small>pure-MoonBit TDS</small>"]
       MOCK["MockDriver<br/><small>in-memory, ships here</small>"]
     end

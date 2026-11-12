@@ -41,7 +41,7 @@ async fn demo() -> Unit raise @moondb.DbError {
   db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT)", []) |> ignore
   db.execute("INSERT INTO t (n) VALUES (?)", [@moondb.Text("a")]) |> ignore
   let rows = db.query("SELECT n FROM t", [])
-  assert_eq(rows[0].text(0), "a")
+  println(rows[0].text(0))   // a
   db.close()
 }
 ```
@@ -70,8 +70,8 @@ calls in `ffi_native.mbt` and `ffi_js.mbt` differ.
 > then reach it as `@sqlite` (as below). `Value` constructors come from `@moondb`
 > (`moon add moonbitstack/moondb`).
 
-```moonbit
-// native target only — this package links the vendored amalgamation.
+```moonbit native
+// native only — this block links the vendored amalgamation.
 fn demo() -> Unit raise @moondb.DbError {
   let db = @sqlite.SqliteDriver::open(":memory:")   // implements @moondb.Driver
   db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)", [])

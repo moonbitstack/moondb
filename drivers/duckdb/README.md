@@ -60,7 +60,7 @@ async fn demo() -> Unit raise @moondb.DbError {
   db.execute("CREATE TABLE t (id INTEGER, n VARCHAR)", []) |> ignore
   db.execute("INSERT INTO t VALUES (?, ?)", [Int(1), Text("a")]) |> ignore
   let rows = db.query("SELECT n FROM t", [])
-  assert_eq(rows[0].text(0), "a")
+  println(rows[0].text(0))   // a
   db.close()
 }
 ```

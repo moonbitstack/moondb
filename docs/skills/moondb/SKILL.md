@@ -13,6 +13,13 @@ servers that borrow a protocol but not its SQL get a package of their own
 (`moonckdb` for CockroachDB, `moontidb` for TiDB). Code written against `Driver`
 runs on all of them.
 
+`moonsqlite` and `moonduckdb` also compile for the js target, where they run the
+engine's own WebAssembly build instead of a linked one. The type, the methods and
+the trait are the same; only `open` is `async` there, because instantiating a
+module is a promise. The engine is fetched before the run
+(`scripts/fetch_engine.sh`, and `fetch_wasm_engine.sh` for DuckDB) and never
+shipped in the package; `MOONSQLITE_ENGINE` / `MOONDUCKDB_ENGINE` name it.
+
 ## Install and import
 
 ```bash
