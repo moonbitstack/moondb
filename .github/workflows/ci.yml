@@ -107,14 +107,22 @@ jobs:
           moon version --all
           moon update
 
+      # The js backend loads SQLite's own WebAssembly build instead of linking the
+      # amalgamation. It is fetched, not committed, and the same driver runs on it.
+      - name: fetch the SQLite wasm engine
+        run: |
+          dist=$(sh scripts/fetch_engine.sh | tail -1)
+          echo "MOONSQLITE_ENGINE=$dist" >> $GITHUB_ENV
+          echo "engine: $dist"
+
       - name: moon check
-        run: moon check --target native --deny-warn
+        run: moon check --target all --deny-warn
 
       - name: moon build
-        run: moon build --target native
+        run: moon build --target all
 
-      - name: moon test (native, real SQLite)
-        run: moon test --target native
+      - name: moon test (native and js, real SQLite on both)
+        run: moon test --target all
 
       - name: lint (fmt is clean)
         run: |
@@ -655,14 +663,22 @@ jobs:
           echo "MOONDUCKDB_LIBRARY=$engine" >> $GITHUB_ENV
           echo "engine: $engine"
 
+      # The js backend runs DuckDB's WebAssembly build, which is a second engine: fetched
+      # the same way, from the same pinned version, and never part of the package.
+      - name: fetch the DuckDB wasm engine
+        run: |
+          dist=$(sh scripts/fetch_wasm_engine.sh | tail -1)
+          echo "MOONDUCKDB_ENGINE=$dist" >> $GITHUB_ENV
+          echo "wasm engine: $dist"
+
       - name: moon check
         run: moon check --target all --deny-warn
 
       - name: moon build
         run: moon build --target all
 
-      - name: moon test (the shared matrix against the real engine)
-        run: moon test --target native
+      - name: moon test (the shared matrix against both engines)
+        run: moon test --target all
 
       - name: lint (fmt is clean)
         run: |

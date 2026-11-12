@@ -18,10 +18,15 @@ keywords = [
   "database",
   "sql",
   "moondb",
+  "wasm",
+  "webassembly",
+  "browser",
+  "node",
+  "javascript",
   "moonbit",
 ]
 
-description = "DuckDB for moondb — the embedded analytical engine behind an in-process driver, loaded at run time so nothing is compiled from C++."
+description = "DuckDB for moondb: the embedded analytical engine, loaded as a shared library on native and as DuckDB's own WebAssembly build on js, one driver for both."
 
 preferred_target = "native"
 

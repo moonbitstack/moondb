@@ -1,7 +1,9 @@
 # moonduckdb
 
 **DuckDB for moondb** — the embedded analytical engine behind the same `Driver` contract as
-SQLite, so a query layer written once runs on a columnar store.
+SQLite, so a query layer written once runs on a columnar store. The same driver compiles for
+native, where it loads the released shared library, and for js, where it runs DuckDB's own
+WebAssembly build.
 
 ```
 moon add moonbitstack/moonduckdb
@@ -38,6 +40,41 @@ Without it, opening a connection raises `ConnectError` saying which name was loo
 That is the honest failure: a driver cannot run an engine it cannot find, and a lazy
 `dlopen` failure at the first statement is worse than a clear one at connect time.
 
+## The same driver on the js target
+
+There is no shared library in a browser, so the js target instantiates DuckDB's WebAssembly
+build instead — the same engine, compiled by the DuckDB project:
+
+```sh
+drivers/duckdb/scripts/fetch_wasm_engine.sh   # npm-installs the pinned build
+export MOONDUCKDB_ENGINE=$(drivers/duckdb/scripts/fetch_wasm_engine.sh)
+```
+
+`DuckdbDriver` is the same type with the same methods and the same `@moondb.Driver`, and its
+`open` is the only difference: instantiating a module is a promise, so on js it is `async`
+and everything after it is not.
+
+```moonbit js
+async fn demo() -> Unit raise @moondb.DbError {
+  let db = @moonduckdb.DuckdbDriver::open(":memory:")
+  db.execute("CREATE TABLE t (id INTEGER, n VARCHAR)", []) |> ignore
+  db.execute("INSERT INTO t VALUES (?, ?)", [Int(1), Text("a")]) |> ignore
+  let rows = db.query("SELECT n FROM t", [])
+  assert_eq(rows[0].text(0), "a")
+  db.close()
+}
+```
+
+Three things follow from how the bindings work, and each is handled rather than hidden:
+
+- **A 64-bit parameter crosses as a Number**, because the worker protocol is JSON and JSON
+  has no BigInt. A value above 2⁵³ loses its low bits on this target; native carries all 64.
+- **A blob parameter travels as `\xNN` escapes**, DuckDB's own STRING-to-BLOB form, for the
+  same reason: a typed array does not survive the JSON hop, and the escapes land unchanged.
+- **One database per module instance.** Opening a connection re-opens the database, so two
+  `:memory:` databases are isolated from each other, but two connections open at once see
+  one catalog.
+
 ## What it adds to the contract
 
 DuckDB is not SQLite with a different name, and the differences are reported rather than
@@ -73,10 +110,10 @@ value, and this package refuses to guess.
 
 ## Tested against a real engine
 
-CI fetches DuckDB v1.1.3, points `MOONDUCKDB_LIBRARY` at it, and runs the shared
-[conformance matrix](https://moonbitstack.github.io/moondb/guide.html#conformance) plus
-this driver's own tests: **12 cases, 11 passed, 1 skipped, 0 failed**, the skip being the
-savepoint the engine does not have.
+CI fetches DuckDB v1.1.3 for native and the pinned WebAssembly build for js, and runs the
+shared [conformance matrix](https://moonbitstack.github.io/moondb/guide.html#conformance)
+plus this driver's own tests against both: **12 cases, 11 passed, 1 skipped, 0 failed** on
+each, the skip being the savepoint the engine does not have.
 
 ## Not covered
 

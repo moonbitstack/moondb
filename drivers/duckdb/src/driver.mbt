@@ -2,32 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 ///|
-/// A live connection to a DuckDB database, embedded in the process and reached through
-/// its C API. Open it with [`DuckdbDriver::open`]; it implements `@moondb.Driver`, so a
-/// query layer written for SQLite or PostgreSQL drives it unchanged.
+/// A live connection to a DuckDB database, embedded in the process and reached through its
+/// C API — or, on the js target, through DuckDB's own WebAssembly build, which offers the
+/// same calls once it is instantiated.
 ///
-/// The engine itself is not linked in: the stub loads the released shared library on the
+/// On native the engine is not linked in: the stub loads the released shared library on the
 /// first call, which is what keeps this package a single small C file instead of a
 /// twenty-megabyte C++ build. `MOONDUCKDB_LIBRARY` names the library when the loader's
-/// default search does not find it.
+/// default search does not find it. On js the engine is a build fetched before the run: see
+/// `scripts/fetch_engine.sh`.
+///
+/// The type, its methods and the trait are the same on both. Only `open` differs, because
+/// a WebAssembly module has to be instantiated before it can be called.
 pub struct DuckdbDriver {
   handle : Int64
   mut closed : Bool
-}
-
-///|
-/// Open (or create) the database at `path`. Use `":memory:"` for a private in-memory
-/// database. Raises `@moondb.ConnectError` when the library cannot be loaded — the
-/// message says which name was looked for — or when the file cannot be opened.
-pub fn DuckdbDriver::open(path : String) -> DuckdbDriver raise @moondb.DbError {
-  if ffi_load() != 0 {
-    raise @moondb.ConnectError(bytes_to_str(ffi_error()))
-  }
-  let handle = ffi_open(@utf8.encode(path))
-  if handle == 0L {
-    raise @moondb.ConnectError(bytes_to_str(ffi_error()))
-  }
-  { handle, closed: false, }
 }
 
 ///|
@@ -44,37 +33,9 @@ fn DuckdbDriver::ensure_open(self : DuckdbDriver) -> Unit raise @moondb.DbError 
 }
 
 ///|
-/// The failure a message describes. DuckDB prefixes its messages with the class
-/// (`Constraint Error`, `Parser Error`, …), which is the only structured fact it offers:
-/// there is no SQLSTATE and no numeric code, so the class is read off the text and
-/// reported as the kind, with the sentence left intact.
-fn error_of(message : String) -> @moondb.DbError {
-  let kind = if message.contains("Constraint Error") {
-    @moondb.ErrorKind::Integrity
-  } else if message.contains("Conversion Error") {
-    @moondb.ErrorKind::Data
-  } else if message.contains("Parser Error") ||
-    message.contains("Binder Error") ||
-    message.contains("Catalog Error") {
-    @moondb.ErrorKind::Programming
-  } else {
-    @moondb.ErrorKind::Database
-  }
-  @moondb.Server({
-    kind,
-    sqlstate: None,
-    code: None,
-    message,
-    detail: None,
-    hint: None,
-    severity: None,
-  })
-}
-
-///|
 /// Run a non-row statement. DuckDB reports the number of rows it changed, which is what
-/// `ExecResult` carries; it has no last-insert-id, so that stays zero rather than a
-/// value a caller could mistake for one.
+/// `ExecResult` carries; it has no last-insert-id, so that stays zero rather than a value a
+/// caller could mistake for one.
 fn DuckdbDriver::execute_with(
   self : DuckdbDriver,
   sql : String,
@@ -145,8 +106,8 @@ pub impl @moondb.Driver for DuckdbDriver with fn query(self, sql, params) {
 }
 
 ///|
-/// Begin a transaction. DuckDB's transactions are real: a rollback discards the work and
-/// a commit keeps it, which the conformance matrix asserts.
+/// Begin a transaction. DuckDB's transactions are real: a rollback discards the work and a
+/// commit keeps it, which the conformance matrix asserts.
 pub impl @moondb.Driver for DuckdbDriver with fn begin(self) {
   self.exec_script("BEGIN TRANSACTION")
 }
@@ -211,48 +172,4 @@ pub extend DuckdbDriver with @moondb.Driver::{
   dialect,
   capabilities,
   query_stream,
-}
-
-///|
-/// Every row of a result, then the result is released — the caller never holds an engine
-/// handle it would have to close.
-fn read_result(result : Int64) -> Array[@moondb.Row] raise @moondb.DbError {
-  if result == 0L {
-    raise error_of(bytes_to_str(ffi_error()))
-  }
-  let message = bytes_to_str(ffi_result_message(result))
-  if message != "" {
-    ffi_result_close(result)
-    raise error_of(message)
-  }
-  let cols = ffi_cols(result)
-  let names : Array[String] = []
-  for i = 0; i < cols; i = i + 1 {
-    names.push(bytes_to_str(ffi_col_name(result, i)))
-  }
-  let rows : Array[@moondb.Row] = []
-  let count = ffi_rows(result)
-  for r = 0L; r < count; r = r + 1 {
-    let values : Array[@moondb.Value] = []
-    for c = 0; c < cols; c = c + 1 {
-      values.push(cell(result, c, r))
-    }
-    rows.push({ columns: names, values, })
-  }
-  ffi_result_close(result)
-  rows
-}
-
-///|
-/// One cell as the `Value` its column type implies. `NULL` is a case of its own, so a
-/// column of nullable integers does not turn its missing values into zeros.
-fn cell(result : Int64, col : Int32, row : Int64) -> @moondb.Value {
-  match ffi_cell_kind(result, col, row) {
-    0 => @moondb.Null
-    1 => @moondb.Int64(ffi_cell_int(result, col, row))
-    2 => @moondb.Double(ffi_cell_double(result, col, row))
-    3 => @moondb.Bool(ffi_cell_bool(result, col, row) != 0)
-    5 => @moondb.Blob(ffi_cell_blob(result, col, row))
-    _ => @moondb.Text(bytes_to_str(ffi_cell_text(result, col, row)))
-  }
 }

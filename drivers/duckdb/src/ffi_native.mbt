@@ -90,10 +90,3 @@ extern "c" fn ffi_exec_prepared(prepared : Int64) -> Int64 = "moonduckdb_exec_pr
 
 ///|
 extern "c" fn ffi_query_prepared(prepared : Int64) -> Int64 = "moonduckdb_query_prepared"
-
-///|
-fn bytes_to_str(bytes : Bytes) -> String {
-  @utf8.decode(bytes) catch {
-    _ => ""
-  }
-}

@@ -19,10 +19,15 @@ keywords = [
   "native",
   "moondb",
   "moonorm",
+  "wasm",
+  "webassembly",
+  "browser",
+  "node",
+  "javascript",
   "moonbit",
 ]
 
-description = "SQLite driver for moondb/moonorm — native FFI, amalgamation vendored here (isolated)."
+description = "SQLite for moondb: the vendored amalgamation on native, SQLite's official WebAssembly build on js, one driver for both."
 
 preferred_target = "native"
 

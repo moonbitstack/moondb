@@ -151,7 +151,7 @@ extern "js" fn js_install() -> JsToolkit =
   #|       return engine.capi.sqlite3_bind_int(Number(st), i, v)
   #|     },
   #|     bind_int64(st, i, v) {
-  #|       return engine.capi.sqlite3_bind_int64(Number(st), i, v)
+  #|       return engine.capi.sqlite3_bind_int64(Number(st), i, BigInt.asIntN(64, v))
   #|     },
   #|     bind_double(st, i, v) {
   #|       return engine.capi.sqlite3_bind_double(Number(st), i, v)
@@ -184,8 +184,10 @@ extern "js" fn js_install() -> JsToolkit =
   #|     col_type(st, i) {
   #|       return engine.capi.sqlite3_column_type(Number(st), i)
   #|     },
+  #|     /* MoonBit's Int64 is the unsigned 64-bit pattern: a negative value goes back as
+  #|        its two's-complement bits, which is what the C backend leaves in the register. */
   #|     col_int64(st, i) {
-  #|       return engine.capi.sqlite3_column_int64(Number(st), i)
+  #|       return BigInt.asUintN(64, engine.capi.sqlite3_column_int64(Number(st), i))
   #|     },
   #|     col_double(st, i) {
   #|       return engine.capi.sqlite3_column_double(Number(st), i)
@@ -228,7 +230,7 @@ extern "js" fn js_install() -> JsToolkit =
   #|       return engine.capi.sqlite3_changes(Number(db))
   #|     },
   #|     last_id(db) {
-  #|       return engine.capi.sqlite3_last_insert_rowid(Number(db))
+  #|       return BigInt.asUintN(64, engine.capi.sqlite3_last_insert_rowid(Number(db)))
   #|     },
   #|     close(db) {
   #|       return engine.capi.sqlite3_close_v2(Number(db))
