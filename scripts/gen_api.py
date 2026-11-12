@@ -8,6 +8,10 @@
 # the mbti format does not carry, and each page's shell from the
 # `api.template.html` beside it.
 #
+# A package whose surface is not the same on every backend gets one more thing: the
+# declarations that differ are marked with the other backend's signature, read from the
+# report `moon info --target all` prints for it.
+#
 #   moon info --target js                  # in the root and each drivers/*
 #   python3 scripts/gen_api.py            # write the page
 #   python3 scripts/gen_api.py --check    # exit 1 if the page is stale
@@ -15,9 +19,11 @@
 import glob
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MOON = os.environ.get("MOON", "moon")
 
 # (package dir, full package name, display label, anchor)
 # Each site: the page it writes, the shell it fills, the class its package
@@ -104,6 +110,14 @@ DECL_RE = re.compile(
     r"([A-Za-z_]\w*(?:::[A-Za-z_]\w*)?)"
 )
 
+# The packages whose interface is not the same on every backend. Only these are asked for
+# a per-backend report; for everything else the canonical `pkg.generated.mbti` is the whole
+# truth and the extra check would be spent compiling targets nothing differs on.
+DIVERGENT = {"moonbitstack/moonsqlite", "moonbitstack/moonduckdb"}
+
+# `moon info --target all` names the backend a diff side belongs to as `+++ pkg Js (path)`.
+PLUS_HDR = re.compile(r"^\+\+\+\s+\S+\s+(\S+)\s+\(")
+
 
 def _count(text, opens, closes):
     return text.count(opens) - text.count(closes)
@@ -150,10 +164,73 @@ def _key(decl):
     return m.group(2) if m else ""
 
 
+def _module_root(pkg_dir):
+    d = os.path.abspath(os.path.join(ROOT, pkg_dir))
+    while True:
+        if os.path.exists(os.path.join(d, "moon.mod")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def other_backends(pkg_dir):
+    """key -> [(backend, signature)] for the declarations a backend spells differently.
+
+    `moon info` writes one interface per package — the canonical backend's — and *reports*
+    the others as a diff. That report is the only machine-readable account of a package
+    whose surface is not the same everywhere, which is the case for a driver whose `open`
+    is `async` exactly where the engine has to be instantiated. A missing tool, a failed
+    check or a package that does not diverge all come back as `{}`: a note on the page is
+    worth having, and never worth failing the build over.
+    """
+    mod = _module_root(pkg_dir)
+    if not mod:
+        return {}
+    try:
+        run = subprocess.run(
+            [MOON, "info", "--target", "all"],
+            cwd=mod,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    minus, plus, backend = {}, {}, None
+    for line in (run.stdout + run.stderr).splitlines():
+        header = PLUS_HDR.match(line)
+        if header:
+            backend = header.group(1)
+            continue
+        if line.startswith("---") or line.startswith("+++"):
+            continue
+        if line.startswith("-"):
+            key = _key(line[1:])
+            if key:
+                minus[key] = line[1:].strip()
+        elif backend and line.startswith("+"):
+            key = _key(line[1:])
+            if key:
+                plus.setdefault(key, []).append((backend, line[1:].strip()))
+    return {
+        key: sigs
+        for key, sigs in plus.items()
+        if key in minus and any(sig != minus[key] for _, sig in sigs)
+    }
+
+
 def parse_docs(pkg_dir):
     """key -> list of doc lines, harvested from the `///` blocks in the sources."""
     docs = {}
     paths = sorted(glob.glob(os.path.join(pkg_dir, "**", "*.mbt"), recursive=True))
+    # A declaration built twice — once per backend, `open` in `open_native.mbt` and
+    # `open_js.mbt` — is documented twice. The page is the canonical interface, so the
+    # native file's prose is the one that describes the signature shown.
+    paths.sort(key=lambda p: (0 if p.endswith("_native.mbt") else 1, p))
     for path in paths:
         if path.endswith("_test.mbt") or path.endswith("_wbtest.mbt"):
             continue
@@ -263,17 +340,23 @@ def render_doc(text):
     return "".join(chunks)
 
 
-def render_entry(kind, sig, doc):
+def render_entry(kind, sig, doc, others=None):
     body = render_doc(doc)
     out = ['<div class="entry">']
     out.append(f'<pre class="signature">{_esc(sig)}</pre>')
+    for backend, alt in others or ():
+        out.append(
+            f'<p class="targets">On <code class="inline">{_esc(backend.lower())}</code>: '
+            f'<code class="inline">{_esc(alt)}</code></p>'
+        )
     if body:
         out.append(f'<div class="doc">{body}</div>')
     out.append("</div>")
     return "".join(out)
 
 
-def section(full_name, label, anchor, entries, docs, first, eyebrow):
+def section(full_name, label, anchor, entries, docs, first, eyebrow, diverging=None):
+    diverging = diverging or {}
     types = sorted([e for e in entries if e[0] in TYPE_KINDS], key=lambda e: e[1].lower())
     fns = sorted([e for e in entries if e[0] not in TYPE_KINDS], key=lambda e: e[1].lower())
     cls = "section first" if first else "section"
@@ -285,7 +368,7 @@ def section(full_name, label, anchor, entries, docs, first, eyebrow):
             continue
         out.append(f'<h3>{title} <span class="count">{len(group)}</span></h3>')
         for kind, key, sig in group:
-            out.append(render_entry(kind, sig, docs.get(key, "")))
+            out.append(render_entry(kind, sig, docs.get(key, ""), diverging.get(key)))
     out.append("</section>")
     return "\n".join(out)
 
@@ -307,8 +390,11 @@ def build(site):
             continue
         entries = [e for e in parse_mbti(mbti)
                    if not (e[1].split("::")[-1] in DERIVED and not docs.get(e[1]))]
+        diverging = other_backends(pkg_dir) if full in DIVERGENT else {}
         total += len(entries)
-        sections.append(section(full, label, anchor, entries, docs, first, site["eyebrow"]))
+        sections.append(
+            section(full, label, anchor, entries, docs, first, site["eyebrow"], diverging)
+        )
         first = False
         nav.append(f'<a href="#{anchor}">{label}<span class="n">{len(entries)}</span></a>')
     return "\n".join(nav), "\n".join(sections), total, len(nav)
