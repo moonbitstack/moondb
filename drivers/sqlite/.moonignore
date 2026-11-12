@@ -1,0 +1,6 @@
+# The SQLite wasm engine is a download, not part of this module:
+# `scripts/fetch_engine.sh` puts it in `engine/`, and a published package must carry the
+# driver without it.
+engine/
+_build/
+target/

@@ -4,6 +4,10 @@
 // native runtime must not reference-count or free a foreign pointer, and an integer
 // is inert to the GC. A returned handle of `0` signals failure. `#borrow` marks
 // arguments the C side only reads, so MoonBit keeps ownership.
+//
+// `ffi_js.mbt` declares the same names with the same shapes over the official SQLite
+// wasm build, which is what lets `bind.mbt`, `read.mbt`, `error.mbt` and the driver
+// bodies be written once and compiled against whichever of the two the target has.
 
 ///|
 #borrow(path)
@@ -87,13 +91,3 @@ extern "c" fn ffi_last_id(db : Int64) -> Int64 = "orm_last_id"
 
 ///|
 extern "c" fn ffi_close(db : Int64) -> Int32 = "orm_close"
-
-///|
-/// SQLite `sqlite3_step` return codes we distinguish.
-let sqlite_ok : Int32 = 0
-
-///|
-let sqlite_row : Int32 = 100
-
-///|
-let sqlite_done : Int32 = 101

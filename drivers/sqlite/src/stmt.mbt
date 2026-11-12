@@ -78,10 +78,7 @@ impl @moondb.Stmt for SqliteStmt with fn query(self) raise @moondb.DbError {
   self.ensure_open()
   ffi_reset(self.st) |> ignore
   let ncol = ffi_col_count(self.st)
-  let cols : Array[String] = []
-  for i = 0; i < ncol; i = i + 1 {
-    cols.push(bytes_to_str(ffi_col_name(self.st, i)))
-  }
+  let cols = column_names(self.st)
   let rows : Array[@moondb.Row] = []
   let mut term = sqlite_done
   for ;; {
@@ -104,10 +101,7 @@ impl @moondb.Stmt for SqliteStmt with fn query_stream(self) raise @moondb.DbErro
   self.ensure_open()
   ffi_reset(self.st) |> ignore
   let ncol = ffi_col_count(self.st)
-  let cols : Array[String] = []
-  for i = 0; i < ncol; i = i + 1 {
-    cols.push(bytes_to_str(ffi_col_name(self.st, i)))
-  }
+  let cols = column_names(self.st)
   SqliteStmtCursor::{ stmt: self, cols, ncol, done: false, }
 }
 
@@ -127,24 +121,6 @@ impl @moondb.Stmt for SqliteStmt with fn sql(self) {
 ///|
 impl @moondb.Stmt for SqliteStmt with fn params(self) {
   self.slots
-}
-
-///|
-/// Read one row whose statement is positioned on it. SQLite column types:
-/// 1=INTEGER 2=FLOAT 3=TEXT 4=BLOB 5=NULL.
-fn read_row(st : Int64, ncol : Int32) -> Array[@moondb.Value] {
-  let vals : Array[@moondb.Value] = []
-  for i = 0; i < ncol; i = i + 1 {
-    let v : @moondb.Value = match ffi_col_type(st, i) {
-      1 => @moondb.Int64(ffi_col_int64(st, i))
-      2 => @moondb.Double(ffi_col_double(st, i))
-      3 => @moondb.Text(bytes_to_str(ffi_col_text(st, i)))
-      4 => @moondb.Blob(ffi_col_blob(st, i))
-      _ => @moondb.Null
-    }
-    vals.push(v)
-  }
-  vals
 }
 
 ///|

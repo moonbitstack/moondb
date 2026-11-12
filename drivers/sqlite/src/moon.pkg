@@ -1,18 +1,45 @@
-// moonsqlite: the native SQLite driver for the moondb interface. It implements
-// `@moondb.Driver` over the vendored SQLite amalgamation (in `sqlite/`), so every
-// moondb-based query layer (moonorm and friends) runs on real SQLite. This is the
-// only package in the stack that touches C; it is native-gated for that reason, and
-// the amalgamation is isolated here so nothing above it leaves pure MoonBit.
+// moonsqlite: the SQLite driver for the moondb interface, in two backends that share one
+// driver body. On native the vendored amalgamation is linked through a C stub; on js the
+// official SQLite wasm build is loaded at run time. Both expose the same two dozen calls
+// (`ffi_native.mbt` / `ffi_js.mbt`), so binding, row decoding, the result-code
+// classification and the statement types are written once.
+//
+// No engine is part of the published package: native links the amalgamation in `sqlite/`,
+// js loads a build fetched before the run (`scripts/fetch_engine.sh`), which git and
+// `.moonignore` both keep out.
+//
+// `-unused_package` is off because `moonbitlang/async/js_async` is imported for the js
+// files only, and a native check has no file that can use it.
+//
+// Two targets, one driver: wasm and wasm-gc have neither a C amalgamation nor a wasm
+// engine to load, so the package does not exist there rather than compile to nothing.
+supported_targets = "+native+js"
 
-supported_targets = "native"
+warnings = "-unused_package"
 
 import {
   "moonbitstack/moondb",
+  "moonbitlang/async/js_async",
   "moonbitlang/core/encoding/utf8",
 }
 
 options(
   "native-stub": [ "sqlite/stub.c", "sqlite/sqlite3.c" ],
+  targets: {
+    "ffi_native.mbt": [ "native" ],
+    "ffi_js.mbt": [ "js" ],
+    "sqlite.mbt": [ "native" ],
+    "stmt.mbt": [ "native" ],
+    "wasm.mbt": [ "js" ],
+    "error_test.mbt": [ "native" ],
+    "error_wbtest.mbt": [ "native" ],
+    "matrix_test.mbt": [ "native" ],
+    "sqlite_test.mbt": [ "native" ],
+    "stmt_test.mbt": [ "native" ],
+    "conformance_test.mbt": [ "native" ],
+    "wasm_test.mbt": [ "js" ],
+    "wasm_conformance_test.mbt": [ "js" ],
+  },
 )
 
 import {

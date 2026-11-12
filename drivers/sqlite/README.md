@@ -2,7 +2,7 @@
 
 # moonsqlite
 
-**The native SQLite driver for [`moondb`](https://github.com/moonbitstack/moondb) — `impl @moondb.Driver`.**
+**SQLite for [`moondb`](https://github.com/moonbitstack/moondb) — `impl @moondb.Driver` on native, `impl @moondb.AsyncDriver` on js.**
 
 [![Check and Test](https://github.com/moonbitstack/moondb/actions/workflows/ci.yml/badge.svg)](https://github.com/moonbitstack/moondb/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
@@ -20,9 +20,48 @@ domain). Any moondb-based query layer — [`moonorm`](https://github.com/moonbit
 `Session`, or a hand-written statement — runs against a real SQLite database through
 it, unchanged.
 
-This is the **only C-touching package** in the moondb / moonorm stack. The
-amalgamation is isolated here so everything above it stays pure MoonBit; the package
-is native-gated (`supported_targets = "native"`) because it links C.
+The same driver has a second backend: on the **js** target it runs SQLite compiled to
+WebAssembly, the build SQLite's own project publishes, so the same contract holds in a
+browser or under Node. On native, this is the **only C-touching package** in the moondb /
+moonorm stack — the amalgamation is isolated here so everything above it stays pure
+MoonBit.
+
+| Target | Engine | Trait | Open with |
+|---|---|---|---|
+| `native` | vendored amalgamation, linked | `@moondb.Driver` | `SqliteDriver::open` |
+| `js` | SQLite wasm build, loaded at run time | `@moondb.Driver` | `SqliteDriver::open` (`async`) |
+
+Both backends expose the same type, the same methods and the same trait. The one difference
+is that a WebAssembly module has to be instantiated before it can be called, so on `js`
+`open` is asynchronous and everything after it is not:
+
+```moonbit js
+async fn demo() -> Unit raise @moondb.DbError {
+  let db = @sqlite.SqliteDriver::open(":memory:")   // await the engine, then it is a Driver
+  db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT)", []) |> ignore
+  db.execute("INSERT INTO t (n) VALUES (?)", [@moondb.Text("a")]) |> ignore
+  let rows = db.query("SELECT n FROM t", [])
+  assert_eq(rows[0].text(0), "a")
+  db.close()
+}
+```
+
+The engine is not part of the package. On native it is the amalgamation in `sqlite/`, which
+the module ships; on `js` it is SQLite's own WebAssembly build, fetched before the run:
+
+```bash
+sh scripts/fetch_engine.sh     # prints the directory holding sqlite3.wasm
+export MOONSQLITE_ENGINE=$(sh scripts/fetch_engine.sh)
+```
+
+`MOONSQLITE_ENGINE` names the build directory. Without it the driver searches for
+`engine/sqlite-wasm/dist` from the working directory upwards, which is what a checkout that
+ran the script has.
+
+The package names both targets (`supported_targets = "+native+js"`); `wasm` and `wasm-gc`
+have neither an amalgamation nor an engine to load, so it is not built there. The binding,
+row-decoding and result-code files are compiled once and serve both — only the two-dozen
+calls in `ffi_native.mbt` and `ffi_js.mbt` differ.
 
 ## Quickstart
 

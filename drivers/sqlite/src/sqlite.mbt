@@ -59,56 +59,6 @@ pub fn SqliteDriver::exec_script(
 }
 
 ///|
-fn bytes_to_str(b : Bytes) -> String {
-  @utf8.decode(b) catch {
-    _ => ""
-  }
-}
-
-///|
-/// Bind each `@moondb.Value` to its 1-based SQLite parameter slot. Every variant maps
-/// to a SQLite storage class out-of-band — nothing is ever spliced into the SQL text.
-///
-/// A statement can be given more values than it has slots. SQLite answers the extra bind
-/// with SQLITE_RANGE and carries on, so the driver has to look: silently dropping the
-/// surplus would run the statement with a different set of values than the caller passed.
-fn bind_params(
-  st : Int64,
-  params : Array[@moondb.Value],
-) -> Unit raise @moondb.DbError {
-  for i = 0; i < params.length(); i = i + 1 {
-    let idx = i + 1
-    let rc = match params[i] {
-      @moondb.Null => ffi_bind_null(st, idx)
-      @moondb.Bool(v) => ffi_bind_int(st, idx, if v { 1 } else { 0 })
-      @moondb.Int(v) => ffi_bind_int(st, idx, v)
-      @moondb.Int64(v) => ffi_bind_int64(st, idx, v)
-      @moondb.Double(v) => ffi_bind_double(st, idx, v)
-      @moondb.Text(v) => ffi_bind_text(st, idx, @utf8.encode(v))
-      @moondb.Blob(v) => ffi_bind_blob(st, idx, v)
-      @moondb.Time(v) => ffi_bind_text(st, idx, @utf8.encode(v))
-      @moondb.Numeric(v) => ffi_bind_text(st, idx, @utf8.encode(v))
-      @moondb.Uuid(v) => ffi_bind_blob(st, idx, v)
-      @moondb.Json(v) => ffi_bind_text(st, idx, @utf8.encode(v))
-      @moondb.Array(_) =>
-        ffi_bind_text(st, idx, @utf8.encode(params[i].json_text()))
-    }
-    if rc != sqlite_ok {
-      raise_code(
-        rc,
-        "cannot bind value " +
-        idx.to_string() +
-        " of " +
-        params.length().to_string() +
-        " to a statement with " +
-        ffi_bind_parameter_count(st).to_string() +
-        " placeholder(s)",
-      )
-    }
-  }
-}
-
-///|
 /// Prepare + bind, returning the statement handle or raising the engine's failure if the
 /// statement would not compile.
 fn SqliteDriver::prepare_bound(
@@ -143,10 +93,7 @@ pub impl @moondb.Driver for SqliteDriver with fn execute(self, sql, params) {
 pub impl @moondb.Driver for SqliteDriver with fn query(self, sql, params) {
   let st = self.prepare_bound(sql, params)
   let ncol = ffi_col_count(st)
-  let cols : Array[String] = []
-  for i = 0; i < ncol; i = i + 1 {
-    cols.push(bytes_to_str(ffi_col_name(st, i)))
-  }
+  let cols = column_names(st)
   let rows : Array[@moondb.Row] = []
   let mut term = sqlite_done
   for ;; {
@@ -155,19 +102,7 @@ pub impl @moondb.Driver for SqliteDriver with fn query(self, sql, params) {
       term = rc
       break
     }
-    let vals : Array[@moondb.Value] = []
-    for i = 0; i < ncol; i = i + 1 {
-      // SQLite column types: 1=INTEGER 2=FLOAT 3=TEXT 4=BLOB 5=NULL.
-      let v : @moondb.Value = match ffi_col_type(st, i) {
-        1 => @moondb.Int64(ffi_col_int64(st, i))
-        2 => @moondb.Double(ffi_col_double(st, i))
-        3 => @moondb.Text(bytes_to_str(ffi_col_text(st, i)))
-        4 => @moondb.Blob(ffi_col_blob(st, i))
-        _ => @moondb.Null
-      }
-      vals.push(v)
-    }
-    rows.push({ columns: cols, values: vals, })
+    rows.push({ columns: cols, values: read_row(st, ncol), })
   }
   ffi_finalize(st) |> ignore
   // A mid-scan error (SQLITE_ERROR/BUSY/…) must surface, not silently truncate the
@@ -205,17 +140,7 @@ pub impl @moondb.Cursor for SqliteCursor with fn next(self : SqliteCursor) -> @m
     }
     return None
   }
-  let vals : Array[@moondb.Value] = []
-  for i = 0; i < self.ncol; i = i + 1 {
-    let v : @moondb.Value = match ffi_col_type(self.st, i) {
-      1 => @moondb.Int64(ffi_col_int64(self.st, i))
-      2 => @moondb.Double(ffi_col_double(self.st, i))
-      3 => @moondb.Text(bytes_to_str(ffi_col_text(self.st, i)))
-      4 => @moondb.Blob(ffi_col_blob(self.st, i))
-      _ => @moondb.Null
-    }
-    vals.push(v)
-  }
+  let vals = read_row(self.st, self.ncol)
   Some({ columns: self.cols, values: vals, })
 }
 
@@ -233,10 +158,7 @@ pub impl @moondb.Cursor for SqliteCursor with fn close(self : SqliteCursor) -> U
 pub impl @moondb.Driver for SqliteDriver with fn query_stream(self, sql, params) {
   let st = self.prepare_bound(sql, params)
   let ncol = ffi_col_count(st)
-  let cols : Array[String] = []
-  for i = 0; i < ncol; i = i + 1 {
-    cols.push(bytes_to_str(ffi_col_name(st, i)))
-  }
+  let cols = column_names(st)
   SqliteCursor::{ driver: self, st, cols, ncol, done: false, }
 }
 

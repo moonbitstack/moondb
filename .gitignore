@@ -7,6 +7,5 @@ target/
 examples/*/pkg.generated.mbti
 src/examples/**/pkg.generated.mbti
 docs/engine/
-
-# The DuckDB engine is fetched, not committed: see drivers/duckdb/README.md
 drivers/duckdb/engine/
+drivers/sqlite/engine/

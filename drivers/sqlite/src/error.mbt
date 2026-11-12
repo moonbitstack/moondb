@@ -8,6 +8,18 @@
 // against one of the two reads the same in the other.
 
 ///|
+/// `SQLITE_OK`: the call succeeded.
+let sqlite_ok : Int32 = 0
+
+///|
+/// `SQLITE_ROW`: `sqlite3_step` has a row to read.
+let sqlite_row : Int32 = 100
+
+///|
+/// `SQLITE_DONE`: `sqlite3_step` finished the program.
+let sqlite_done : Int32 = 101
+
+///|
 /// Raise the failure SQLite last recorded on `db`, with the class its result code implies.
 ///
 /// The extended code travels in `code` so a caller can tell `SQLITE_CONSTRAINT_UNIQUE`
