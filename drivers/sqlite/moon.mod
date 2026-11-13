@@ -1,6 +1,6 @@
 name = "moonbitstack/moonsqlite"
 
-version = "0.3.7"
+version = "0.4.0"
 
 readme = "README.md"
 
@@ -32,7 +32,7 @@ description = "SQLite for moondb: the vendored amalgamation on native, SQLite's 
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.2.8",
+  "moonbitstack/moondb@0.3.0",
   "moonbitlang/async@0.22.5",
 }
 

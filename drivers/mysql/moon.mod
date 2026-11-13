@@ -1,6 +1,6 @@
 name = "moonbitstack/moonmysql"
 
-version = "0.7.11"
+version = "0.8.0"
 
 readme = "README.md"
 
@@ -34,13 +34,13 @@ description = "Pure-MoonBit MySQL wire-protocol driver implementing @moondb.Driv
 preferred_target = "native"
 
 import {
-  "moonbitstack/moonbase@0.4.4",
-  "moonbitstack/mooncrypt@0.4.12",
-  "moonbitstack/mooncred@0.6.11",
-  "moonbitstack/moondb@0.2.8",
+  "moonbitstack/moonbase@0.5.0",
+  "moonbitstack/mooncrypt@0.5.0",
+  "moonbitstack/mooncred@0.7.0",
+  "moonbitstack/moondb@0.3.0",
   "moonbitstack/moonvar@0.2.2",
-  "moonbitstack/moonnet@0.1.11",
-  "moonbitstack/moontls@0.9.15",
+  "moonbitstack/moonnet@0.1.12",
+  "moonbitstack/moontls@0.9.17",
   "moonbitlang/async@0.22.5",
 }
 

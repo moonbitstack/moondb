@@ -4,18 +4,19 @@ name: Release
 # opt-in: the publish job runs only while the organization (or repository) variable
 # MOONCAKES_PUBLISH is 'true', so a tag with the switch off only runs the tests.
 #
-# moondb holds four modules; the tag prefix names the one to publish (moondb-v*,
-# moonsqlite-v*, moonpostgres-v*, moonmysql-v*).
+# moondb holds nine modules; the tag prefix names the one to publish (moondb-v*,
+# moonsqlite-v*, moonpostgres-v*, moonmysql-v*, moonchdb-v*, moonckdb-v*, moontidb-v*,
+# moonduckdb-v*, moonsqls-v*).
 on:
   push:
-    tags: ["moondb-v*", "moonsqlite-v*", "moonpostgres-v*", "moonmysql-v*"]
+    tags: ["moondb-v*", "moonsqlite-v*", "moonpostgres-v*", "moonmysql-v*", "moonchdb-v*", "moonckdb-v*", "moontidb-v*", "moonduckdb-v*", "moonsqls-v*"]
   workflow_dispatch:
     inputs:
       module:
         description: module to publish
         required: true
         type: choice
-        options: [moondb, moonsqlite, moonpostgres, moonmysql]
+        options: [moondb, moonsqlite, moonpostgres, moonmysql, moonchdb, moonckdb, moontidb, moonduckdb, moonsqls]
 
 permissions:
   contents: read
@@ -37,6 +38,11 @@ jobs:
             moonsqlite) dir=drivers/sqlite; target=native ;;
             moonpostgres) dir=drivers/postgres; target=all ;;
             moonmysql) dir=drivers/mysql; target=all ;;
+            moonchdb) dir=drivers/chdb; target=native ;;
+            moonckdb) dir=drivers/ckdb; target=native ;;
+            moontidb) dir=drivers/tidb; target=native ;;
+            moonduckdb) dir=drivers/duckdb; target=native ;;
+            moonsqls) dir=drivers/sqls; target=native ;;
             *) echo "::error::unknown module $name"; exit 1 ;;
           esac
           echo "dir=$dir" >> "$GITHUB_OUTPUT"

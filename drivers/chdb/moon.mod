@@ -1,6 +1,6 @@
 name = "moonbitstack/moonchdb"
 
-version = "0.1.0"
+version = "0.0.1"
 
 readme = "README.md"
 
@@ -27,7 +27,7 @@ description = "ClickHouse driver for moondb — the HTTP interface, RowBinary re
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.2.8",
+  "moonbitstack/moondb@0.3.0",
   "moonbitstack/moonvar@0.2.2",
   "moonbitlang/async@0.22.5",
 }

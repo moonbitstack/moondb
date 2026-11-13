@@ -1,8 +1,0 @@
-import {
-  "moonbitstack/moontls/keys",
-  "moonbitstack/moontls/record",
-  "moonbitstack/moontls/alert",
-  "moonbitstack/moonbase/base16",
-}
-
-pkgtype(kind: "executable")

@@ -1,6 +1,6 @@
 name = "moonbitstack/moondb"
 
-version = "0.2.8"
+version = "0.3.0"
 
 readme = "README.md"
 
@@ -39,7 +39,7 @@ description = "The standard database-access interface for MoonBit — the driver
 preferred_target = "wasm-gc"
 
 import {
-  "moonbitstack/moondate@0.1.6",
+  "moonbitstack/moondate@0.1.7",
   "moonbitstack/moonpool@0.3.4",
   "moonbitstack/moonward@0.2.3",
   "moonbitlang/async@0.22.5",

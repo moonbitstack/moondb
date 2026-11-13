@@ -1,6 +1,6 @@
 name = "moonbitstack/moonckdb"
 
-version = "0.1.0"
+version = "0.0.1"
 
 readme = "README.md"
 
@@ -24,10 +24,10 @@ description = "CockroachDB for moondb — the moonpostgres wire protocol, with t
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.2.8",
-  "moonbitstack/moonpostgres@0.6.11",
+  "moonbitstack/moondb@0.3.0",
+  "moonbitstack/moonpostgres@0.7.0",
   "moonbitlang/async@0.22.5",
-  "moonbitstack/moontls@0.9.15",
+  "moonbitstack/moontls@0.9.17",
 }
 
 source = "src"
