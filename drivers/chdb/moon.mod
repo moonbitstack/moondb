@@ -1,6 +1,6 @@
 name = "moonbitstack/moonchdb"
 
-version = "0.0.1"
+version = "0.1.0"
 
 readme = "README.md"
 
@@ -28,7 +28,7 @@ preferred_target = "native"
 
 import {
   "moonbitstack/moondb@0.3.0",
-  "moonbitstack/moonvar@0.2.2",
+  "moonbitstack/moonvar@0.3.0",
   "moonbitlang/async@0.22.5",
 }
 
