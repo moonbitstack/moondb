@@ -1,6 +1,6 @@
 name = "moonbitstack/moontidb"
 
-version = "0.1.0"
+version = "0.1.1"
 
 readme = "README.md"
 
@@ -25,10 +25,10 @@ description = "TiDB for moondb — the moonmysql wire protocol, with the server'
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.3.0",
-  "moonbitstack/moonmysql@0.8.0",
+  "moonbitstack/moondb@0.3.1",
+  "moonbitstack/moonmysql@0.8.1",
   "moonbitlang/async@0.22.5",
-  "moonbitstack/moontls@0.9.17",
+  "moonbitstack/moontls@0.10.2",
 }
 
 source = "src"
