@@ -125,11 +125,11 @@ async test "integration: a nested transaction undoes only its own level" {
 fn chunk_of_rows(rows : Int32, payload : Int32) -> Bytes {
   let b = Buffer()
   for i in 0..<rows {
-    b.write_bytes(b"row-")
-    b.write_bytes(@utf8.encode(i.to_string())[:])
-    b.write_bytes(b"-")
-    b.write_bytes(b"x".repeat(payload))
-    b.write_bytes(b"\n")
+    b.write_bytesview(b"row-")
+    b.write_bytesview(@utf8.encode(i.to_string())[:])
+    b.write_bytesview(b"-")
+    b.write_bytesview(b"x".repeat(payload))
+    b.write_bytesview(b"\n")
   }
   b.to_bytes()
 }

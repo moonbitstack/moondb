@@ -49,8 +49,8 @@ fn all_headers(txn : Bytes) -> Bytes {
 /// A SQL batch: the statement as UTF-16 followed by nothing else.
 fn build_sql_batch(sql : String, txn : Bytes) -> Bytes {
   let out = Buffer()
-  out.write_bytes(all_headers(txn))
-  out.write_bytes(@utf16.encode(sql))
+  out.write_bytesview(all_headers(txn))
+  out.write_bytesview(@utf16.encode(sql))
   packet(0x01, out.to_bytes())
 }
 
@@ -110,16 +110,16 @@ fn rewrite(sql : String) -> String {
       continue
     }
     if c == '?' {
-      out.write_bytes(@utf8.encode(sql[start:i]))
+      out.write_bytesview(@utf8.encode(sql[start:i]))
       slot += 1
-      out.write_bytes(@utf8.encode("@p" + slot.to_string()))
+      out.write_bytesview(@utf8.encode("@p" + slot.to_string()))
       i += 1
       start = i
       continue
     }
     i += 1
   }
-  out.write_bytes(@utf8.encode(sql[start:]))
+  out.write_bytesview(@utf8.encode(sql[start:]))
   decode_lossy(out.to_bytes())
 }
 
@@ -152,7 +152,7 @@ fn plp(out : Buffer, data : Bytes) -> Unit {
   put_u64(out, -2L)
   if data.length() > 0 {
     put_u32(out, data.length())
-    out.write_bytes(data)
+    out.write_bytesview(data)
   }
   put_u32(out, 0)
 }
@@ -170,7 +170,7 @@ fn plp_null(out : Buffer) -> Unit {
 fn put_param_name(out : Buffer, name : String) -> Unit {
   let encoded = @utf16.encode(name)
   out.write_byte((name.length() & 0xFF).to_byte())
-  out.write_bytes(encoded)
+  out.write_bytesview(encoded)
 }
 
 ///|
@@ -217,7 +217,7 @@ fn put_typed_value(out : Buffer, value : @moondb.Value) -> Unit {
       out.write_byte(b'\x24') // GUID
       out.write_byte(b'\x10')
       out.write_byte(b'\x10')
-      out.write_bytes(v)
+      out.write_bytesview(v)
     }
     @moondb.Text(v) | @moondb.Time(v) | @moondb.Numeric(v) | @moondb.Json(v) =>
       nvarchar_value(out, v)
@@ -229,9 +229,9 @@ fn put_typed_value(out : Buffer, value : @moondb.Value) -> Unit {
           text.write_byte(b',')
         }
         match v[i] {
-          @moondb.Int(n) => text.write_bytes(@utf8.encode(n.to_string()))
-          @moondb.Int64(n) => text.write_bytes(@utf8.encode(n.to_string()))
-          @moondb.Double(n) => text.write_bytes(@utf8.encode(n.to_string()))
+          @moondb.Int(n) => text.write_bytesview(@utf8.encode(n.to_string()))
+          @moondb.Int64(n) => text.write_bytesview(@utf8.encode(n.to_string()))
+          @moondb.Double(n) => text.write_bytesview(@utf8.encode(n.to_string()))
           _ => ()
         }
       }
@@ -281,7 +281,7 @@ fn build_rpc_message(
   txn : Bytes,
 ) -> Bytes {
   let out = Buffer()
-  out.write_bytes(all_headers(txn))
+  out.write_bytesview(all_headers(txn))
   put_u16(out, 0xFFFF)
   put_u16(out, proc_id)
   put_u16(out, 0) // option flags
@@ -298,10 +298,10 @@ fn declaration_list(params : Array[@moondb.Value]) -> String {
   let decls = Buffer()
   for i = 0; i < params.length(); i = i + 1 {
     if i > 0 {
-      decls.write_bytes(@utf8.encode(", "))
+      decls.write_bytesview(@utf8.encode(", "))
     }
-    decls.write_bytes(@utf8.encode("@p" + (i + 1).to_string() + " "))
-    decls.write_bytes(@utf8.encode(declaration_of(params[i])))
+    decls.write_bytesview(@utf8.encode("@p" + (i + 1).to_string() + " "))
+    decls.write_bytesview(@utf8.encode(declaration_of(params[i])))
   }
   decode_lossy(decls.to_bytes())
 }

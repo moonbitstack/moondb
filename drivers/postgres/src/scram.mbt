@@ -96,9 +96,9 @@ pub fn scram_client_final(
   // data. Without `-PLUS` it is base64("n,,") = "biws"; with it, the header names
   // the binding type and the data is appended before encoding.
   let cbind_input = Buffer()
-  cbind_input.write_bytes(@utf8.encode(gs2_header)[:])
+  cbind_input.write_bytesview(@utf8.encode(gs2_header)[:])
   match cbind {
-    Some(data) => cbind_input.write_bytes(data[:])
+    Some(data) => cbind_input.write_bytesview(data[:])
     None => ()
   }
   let client_final_wo = "c=" +

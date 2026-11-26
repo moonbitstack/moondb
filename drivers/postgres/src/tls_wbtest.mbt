@@ -31,8 +31,8 @@ test "channel binding puts the gs2 header and the certificate hash in c=" {
     cbind~,
   )
   let input = Buffer()
-  input.write_bytes(@utf8.encode("p=tls-server-end-point,,")[:])
-  input.write_bytes(cbind[:])
+  input.write_bytesview(@utf8.encode("p=tls-server-end-point,,")[:])
+  input.write_bytesview(cbind[:])
   let expected = "c=" + @base64.encode(input.to_bytes()) + ",r=abcdefXYZ"
   assert_eq(client_final.has_prefix(expected), true)
 }

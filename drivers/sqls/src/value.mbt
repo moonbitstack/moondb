@@ -147,7 +147,7 @@ fn read_plp(c : Cursor) -> Bytes? raise @moondb.DbError {
     if size == 0 {
       break
     }
-    out.write_bytes(c.take(size))
+    out.write_bytesview(c.take(size))
   }
   Some(out.to_bytes())
 }
@@ -468,7 +468,7 @@ fn pad(value : Int32, width : Int32) -> String {
   for i = 0; i < width - text.length(); i = i + 1 {
     out.write_byte(b'0')
   }
-  out.write_bytes(@utf8.encode(text))
+  out.write_bytesview(@utf8.encode(text))
   decode_lossy(out.to_bytes())
 }
 

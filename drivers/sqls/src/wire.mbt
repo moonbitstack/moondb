@@ -163,7 +163,7 @@ fn frame_message(kind : Int32, payload : Bytes, first_id : Int32) -> Bytes {
   let mut at = 0
   let mut id = first_id
   if payload.length() == 0 {
-    out.write_bytes(header_of(kind, 8, true, id))
+    out.write_bytesview(header_of(kind, 8, true, id))
     return out.to_bytes()
   }
   while at < payload.length() {
@@ -173,8 +173,8 @@ fn frame_message(kind : Int32, payload : Bytes, first_id : Int32) -> Bytes {
       payload.length() - at
     }
     let last = at + n == payload.length()
-    out.write_bytes(header_of(kind, n + 8, last, id))
-    out.write_bytes(payload[at:at + n])
+    out.write_bytesview(header_of(kind, n + 8, last, id))
+    out.write_bytesview(payload[at:at + n])
     at += n
     id = (id + 1) & 0xFF
   }
@@ -244,8 +244,8 @@ async fn TdsWire::send_packet(
 ) -> Unit raise @moondb.DbError {
   self.packet_id = (self.packet_id + 1) & 0xFF
   let out = Buffer()
-  out.write_bytes(header_of(kind, body.length() + 8, eom, self.packet_id))
-  out.write_bytes(body)
+  out.write_bytesview(header_of(kind, body.length() + 8, eom, self.packet_id))
+  out.write_bytesview(body)
   (self.sock : &@io.Writer).write(out.to_bytes()) catch {
     _ => raise @moondb.ConnectError("tds: the connection closed while writing")
   }
@@ -299,8 +299,8 @@ async fn TdsWire::fill(
       let plain = tls.read()
       if plain.length() > 0 {
         let next = Buffer()
-        next.write_bytes(self.pending)
-        next.write_bytes(plain)
+        next.write_bytesview(self.pending)
+        next.write_bytesview(plain)
         self.pending = next.to_bytes()
       }
       true
@@ -323,7 +323,7 @@ async fn TdsWire::read_message(
         if kind < 0 {
           kind = packet_kind
         }
-        payload.write_bytes(body)
+        payload.write_bytesview(body)
         if (status & 1) != 0 {
           break
         }
@@ -355,7 +355,7 @@ async fn TdsWire::read_message(
         }
         let status = self.pending[1].to_int()
 
-        payload.write_bytes(self.pending[8:length])
+        payload.write_bytesview(self.pending[8:length])
         self.pending = self.pending[length:].to_owned()
         if (status & 1) != 0 {
           break

@@ -35,7 +35,7 @@ fn packet(kind : Int32, payload : Bytes) -> Bytes {
   out.write_byte(b'\x00')
   out.write_byte(b'\x01')
   out.write_byte(b'\x00')
-  out.write_bytes(payload)
+  out.write_bytesview(payload)
   out.to_bytes()
 }
 
@@ -63,12 +63,12 @@ fn build_prelogin(encryption : Encryption) -> Bytes {
     headers.write_byte((offset & 0xFF).to_byte())
     headers.write_byte((data.length() >> 8).to_byte())
     headers.write_byte((data.length() & 0xFF).to_byte())
-    values.write_bytes(data)
+    values.write_bytesview(data)
   }
   let body = Buffer()
-  body.write_bytes(headers.to_bytes())
+  body.write_bytesview(headers.to_bytes())
   body.write_byte(b'\xff')
-  body.write_bytes(values.to_bytes())
+  body.write_bytesview(values.to_bytes())
   packet(0x12, body.to_bytes())
 }
 
@@ -133,11 +133,11 @@ fn build_login(
   let db_b = @utf16.encode(database)
   let before = Buffer()
   for bytes in [host_b, user_b, pass_b, app_b, host_b] {
-    before.write_bytes(bytes)
+    before.write_bytesview(bytes)
   }
   let after = Buffer()
   for bytes in [lib_b, lang_b, db_b] {
-    after.write_bytes(bytes)
+    after.write_bytesview(bytes)
   }
   let before_len = before.to_bytes().length()
   let after_len = after.to_bytes().length()
@@ -145,11 +145,11 @@ fn build_login(
   // after both.
   let feature_offset = 94 + before_len + 4 + after_len
   let body = Buffer()
-  body.write_bytes(before.to_bytes())
+  body.write_bytesview(before.to_bytes())
   for i = 0; i < 4; i = i + 1 {
     body.write_byte(((feature_offset >> (i * 8)) & 0xFF).to_byte())
   }
-  body.write_bytes(after.to_bytes())
+  body.write_bytesview(after.to_bytes())
   // UTF-8 support (feature 0x0A, one byte, on), then the terminator.
   for b in [0x0a, 0x01, 0x00, 0x00, 0x00, 0x01, 0xff] {
     body.write_byte(b.to_byte())
@@ -226,7 +226,7 @@ fn build_login(
     head.write_byte(b'\x00')
   }
   let out = Buffer()
-  out.write_bytes(head.to_bytes())
-  out.write_bytes(body_bytes)
+  out.write_bytesview(head.to_bytes())
+  out.write_bytesview(body_bytes)
   packet(0x10, out.to_bytes())
 }

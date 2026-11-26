@@ -122,7 +122,7 @@ fn put_cell(out : Buffer, ty : Int32, value : @moondb.Value) -> Unit {
       match value {
         @moondb.Uuid(v) => {
           out.write_byte(b'\x10')
-          out.write_bytes(v)
+          out.write_bytesview(v)
         }
         _ => out.write_byte(b'\x00')
       }
@@ -165,7 +165,7 @@ fn put_bulk_column(out : Buffer, column : BulkColumn) -> Unit {
   }
   let name = @utf16.encode(column.name)
   out.write_byte((name.length() / 2).to_byte())
-  out.write_bytes(name)
+  out.write_bytesview(name)
 }
 
 ///|
@@ -238,10 +238,10 @@ pub async fn SqlServerConn::bulk_copy(
   let defs = Buffer()
   for i = 0; i < bulk.length(); i = i + 1 {
     if i > 0 {
-      defs.write_bytes(@utf8.encode(", "))
+      defs.write_bytesview(@utf8.encode(", "))
     }
-    defs.write_bytes(@utf8.encode("[" + bulk[i].name + "] "))
-    defs.write_bytes(@utf8.encode(bulk_declaration(bulk[i].ty)))
+    defs.write_bytesview(@utf8.encode("[" + bulk[i].name + "] "))
+    defs.write_bytesview(@utf8.encode(bulk_declaration(bulk[i].ty)))
   }
   let statement = "INSERT BULK " +
     table +

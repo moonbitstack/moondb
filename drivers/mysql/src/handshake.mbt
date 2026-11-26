@@ -275,7 +275,7 @@ pub fn build_handshake_response(
   }
   put_string_nul(buf, string_to_bytes(user))
   buf.write_byte(auth_response.length().to_byte())
-  buf.write_bytes(auth_response[:])
+  buf.write_bytesview(auth_response[:])
   if database.length() > 0 {
     put_string_nul(buf, string_to_bytes(database))
   }

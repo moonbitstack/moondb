@@ -239,7 +239,7 @@ async test "offline: a failed COPY in sends CopyFail and frees the connection" {
 fn s_bytes(tag : Int32) -> Bytes {
   let b = Buffer()
   b.write_byte(tag.to_byte())
-  b.write_bytes(b"\x00\x00\x00\x04"[:])
+  b.write_bytesview(b"\x00\x00\x00\x04"[:])
   b.to_bytes()
 }
 

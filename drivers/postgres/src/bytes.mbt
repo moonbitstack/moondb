@@ -6,8 +6,8 @@
 /// framing lean on; MoonBit's `Bytes` is immutable so this allocates once.
 pub fn concat_bytes(a : Bytes, b : Bytes) -> Bytes {
   let buf = Buffer()
-  buf.write_bytes(a[:])
-  buf.write_bytes(b[:])
+  buf.write_bytesview(a[:])
+  buf.write_bytesview(b[:])
   buf.to_bytes()
 }
 

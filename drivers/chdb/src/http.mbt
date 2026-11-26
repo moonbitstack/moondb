@@ -12,7 +12,7 @@
 /// and the buffer's `write_string_utf8` assumes a UTF-8 view, so every string goes
 /// through the encoder explicitly.
 fn put(buf : Buffer, text : StringView) -> Unit {
-  buf.write_bytes(@utf8.encode(text))
+  buf.write_bytesview(@utf8.encode(text))
 }
 
 ///|
@@ -96,7 +96,7 @@ fn build_request(
     put(buf, "\r\n")
   }
   put(buf, "\r\n")
-  buf.write_bytes(body)
+  buf.write_bytesview(body)
   buf.to_bytes()
 }
 
@@ -203,7 +203,7 @@ async fn read_body(
       e => raise @moondb.ConnectError("read body: \{e}")
     }
     match chunk {
-      Some(bytes) => buf.write_bytes(bytes)
+      Some(bytes) => buf.write_bytesview(bytes)
       None => break
     }
   }
@@ -237,7 +237,7 @@ async fn read_chunked(reader : &@io.Reader) -> Bytes raise @moondb.DbError {
     let chunk = reader.read_exactly(size) catch {
       e => raise @moondb.ConnectError("read chunk: \{e}")
     }
-    buf.write_bytes(chunk)
+    buf.write_bytesview(chunk)
     let _ = reader.read_exactly(2) catch {
       e => raise @moondb.ConnectError("read chunk terminator: \{e}")
     }

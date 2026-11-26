@@ -33,7 +33,7 @@ pub(all) struct StmtOk {
 pub fn build_stmt_prepare(sql : String) -> Bytes {
   let buf = Buffer()
   buf.write_byte(b'\x16')
-  buf.write_bytes(@utf8.encode(sql)[:])
+  buf.write_bytesview(@utf8.encode(sql)[:])
   buf.to_bytes()
 }
 
@@ -88,7 +88,7 @@ pub fn build_stmt_send_long_data(
   buf.write_byte(b'\x18')
   put_uint_le(buf, id.to_int64(), 4)
   put_uint_le(buf, param.to_int64(), 2)
-  buf.write_bytes(chunk[:])
+  buf.write_bytesview(chunk[:])
   buf.to_bytes()
 }
 

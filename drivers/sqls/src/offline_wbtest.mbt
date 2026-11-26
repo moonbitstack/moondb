@@ -47,10 +47,10 @@ test "prelogin reads the server's answer, including its refusal to encrypt" {
     body.write_byte((offset & 0xFF).to_byte())
     body.write_byte((data.length() >> 8).to_byte())
     body.write_byte((data.length() & 0xFF).to_byte())
-    values.write_bytes(data)
+    values.write_bytesview(data)
   }
   body.write_byte(b'\xff')
-  body.write_bytes(values.to_bytes())
+  body.write_bytesview(values.to_bytes())
   assert_eq(parse_prelogin(body.to_bytes()), 2)
 }
 
@@ -112,7 +112,7 @@ test "a result set becomes rows, and a failure becomes a classified error" {
   payload.write_byte(b'\x00')
   payload.write_byte(b'\x38')
   payload.write_byte(b'\x01')
-  payload.write_bytes(@utf16.encode("n"))
+  payload.write_bytesview(@utf16.encode("n"))
   // ROW: 7.
   payload.write_byte(b'\xd1')
   payload.write_byte(b'\x07')
@@ -150,7 +150,7 @@ test "a result set becomes rows, and a failure becomes a classified error" {
   broken.write_byte(b'\x0e')
   broken.write_byte((text.length() / 2).to_byte())
   broken.write_byte(b'\x00')
-  broken.write_bytes(text)
+  broken.write_bytesview(text)
   broken.write_byte(b'\x00') // server name length
   broken.write_byte(b'\x00') // procedure name length
   broken.write_byte(b'\x01')

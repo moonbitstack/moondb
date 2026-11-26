@@ -73,7 +73,7 @@ test "handshake: parse a protocol-10 initial packet" {
   buf.write_byte(b'\x0a') // protocol version 10
   @moonmysql.put_string_nul(buf, b"8.0.35")
   @moonmysql.put_uint_le(buf, 4L, 4) // connection id
-  buf.write_bytes(b"\x11\x22\x33\x44\x55\x66\x77\x88"[:]) // auth-plugin-data-1
+  buf.write_bytesview(b"\x11\x22\x33\x44\x55\x66\x77\x88"[:]) // auth-plugin-data-1
   buf.write_byte(b'\x00') // filler
   @moonmysql.put_uint_le(buf, 0xF7FFL, 2) // capability lower
   buf.write_byte(b'\xff') // charset (utf8mb4)
@@ -83,7 +83,9 @@ test "handshake: parse a protocol-10 initial packet" {
   for _ in 0..<10 {
     buf.write_byte(b'\x00')
   } // reserved
-  buf.write_bytes(b"\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44\x55\x00"[:]) // auth-2 (13)
+  buf.write_bytesview(
+    b"\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44\x55\x00"[:],
+  ) // auth-2 (13)
   @moonmysql.put_string_nul(buf, b"mysql_native_password")
   let hs = @moonmysql.parse_handshake(buf.to_bytes())
   assert_eq(hs.server_version, "8.0.35")
@@ -121,7 +123,7 @@ test "handshake: parse a MariaDB packet (ext caps read, salt + plugin intact)" {
   buf.write_byte(b'\x0a') // protocol version 10
   @moonmysql.put_string_nul(buf, b"5.5.5-11.4.2-MariaDB-ubu2404")
   @moonmysql.put_uint_le(buf, 7L, 4) // connection id
-  buf.write_bytes(b"\x11\x22\x33\x44\x55\x66\x77\x88"[:]) // auth-plugin-data-1
+  buf.write_bytesview(b"\x11\x22\x33\x44\x55\x66\x77\x88"[:]) // auth-plugin-data-1
   buf.write_byte(b'\x00') // filler
   @moonmysql.put_uint_le(buf, 0xF7FFL, 2) // capability lower
   buf.write_byte(b'\x2d') // charset
@@ -132,7 +134,9 @@ test "handshake: parse a MariaDB packet (ext caps read, salt + plugin intact)" {
     buf.write_byte(b'\x00')
   } // 6 filler bytes
   @moonmysql.put_uint_le(buf, 0x0000001DL, 4) // MariaDB extended capabilities (bits 0..4)
-  buf.write_bytes(b"\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44\x55\x00"[:]) // auth-2 (13)
+  buf.write_bytesview(
+    b"\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44\x55\x00"[:],
+  ) // auth-2 (13)
   @moonmysql.put_string_nul(buf, b"mysql_native_password")
   let hs = @moonmysql.parse_handshake(buf.to_bytes())
   assert_eq(hs.server_kind, @moonmysql.ServerKind::MariaDB)
@@ -170,8 +174,8 @@ test "ERR packet: decoded into ServerError with code and sqlstate" {
   buf.write_byte(b'\xFF')
   @moonmysql.put_uint_le(buf, 1146L, 2) // ER_NO_SUCH_TABLE
   buf.write_byte(b'\x23') // '#'
-  buf.write_bytes(b"42S02"[:])
-  buf.write_bytes(b"Table 'test.t' doesn't exist"[:])
+  buf.write_bytesview(b"42S02"[:])
+  buf.write_bytesview(b"Table 'test.t' doesn't exist"[:])
   let e = @moonmysql.parse_err(buf.to_bytes())
   guard e is ServerError(code, state, msg) else {
     fail("parse_err should decode an ERR packet as a ServerError")

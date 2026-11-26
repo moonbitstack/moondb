@@ -188,7 +188,7 @@ pub fn put_lenenc_uint(buf : Buffer, v : Int64) -> Unit {
 ///|
 /// Append raw bytes followed by a NUL terminator.
 pub fn put_string_nul(buf : Buffer, s : Bytes) -> Unit {
-  buf.write_bytes(s[:])
+  buf.write_bytesview(s[:])
   buf.write_byte(b'\x00')
 }
 
@@ -196,14 +196,14 @@ pub fn put_string_nul(buf : Buffer, s : Bytes) -> Unit {
 /// Append a length-encoded string (its `lenenc` length prefix, then the bytes).
 pub fn put_lenenc_bytes(buf : Buffer, s : Bytes) -> Unit {
   put_lenenc_uint(buf, s.length().to_int64())
-  buf.write_bytes(s[:])
+  buf.write_bytesview(s[:])
 }
 
 ///|
 /// Concatenate two byte strings.
 pub fn concat_bytes(a : Bytes, b : Bytes) -> Bytes {
   let buf = Buffer()
-  buf.write_bytes(a[:])
-  buf.write_bytes(b[:])
+  buf.write_bytesview(a[:])
+  buf.write_bytesview(b[:])
   buf.to_bytes()
 }

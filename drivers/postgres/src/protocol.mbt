@@ -36,13 +36,13 @@ fn MsgWriter::i32(self : MsgWriter, v : Int32) -> Unit {
 
 ///|
 fn MsgWriter::raw(self : MsgWriter, b : Bytes) -> Unit {
-  self.buf.write_bytes(b[:])
+  self.buf.write_bytesview(b[:])
 }
 
 ///|
 /// Write a UTF-8 string followed by its `NUL` terminator (a C string).
 fn MsgWriter::cstring(self : MsgWriter, s : String) -> Unit {
-  self.buf.write_bytes(@utf8.encode(s)[:])
+  self.buf.write_bytesview(@utf8.encode(s)[:])
   self.buf.write_byte(0)
 }
 

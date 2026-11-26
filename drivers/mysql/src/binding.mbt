@@ -35,8 +35,8 @@ fn quoted_text(s : String, mode : QuoteMode) -> Bytes {
 ///|
 fn binary_literal(bytes : Bytes) -> Bytes {
   let buf = Buffer()
-  buf.write_bytes(b"x'")
-  buf.write_bytes(@base16.encode_bytes(bytes))
+  buf.write_bytesview(b"x'")
+  buf.write_bytesview(@base16.encode_bytes(bytes))
   buf.write_byte(b'\'')
   buf.to_bytes()
 }
@@ -171,7 +171,7 @@ pub fn bind_params(
           " parameter(s) supplied",
         )
       }
-      out.write_bytes(render_value(params[pi], mode)[:])
+      out.write_bytesview(render_value(params[pi], mode)[:])
       pi += 1
       i += 1
     } else {

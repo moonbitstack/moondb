@@ -70,7 +70,7 @@ test "a streamed parameter is cut into whole chunks with the remainder last" {
   // Reassembling the slices gives back the parameter: nothing is dropped or doubled.
   let joined = Buffer()
   for slice in odd_slices {
-    joined.write_bytes(slice[:])
+    joined.write_bytesview(slice[:])
   }
   assert_eq(joined.to_bytes().length(), chunk * 2 + 5)
   assert_eq(joined.to_bytes()[chunk * 2 + 4] == b'\x02', true)

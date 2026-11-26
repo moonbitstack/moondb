@@ -16,7 +16,7 @@ pub fn pg_md5_password(
 ) -> String {
   let inner = @md5.hash(@utf8.encode((password + user)[:])[:])
   let salted = Buffer()
-  salted.write_bytes(@utf8.encode(@base16.encode(inner[:]).to_lower()[:]))
-  salted.write_bytes(salt)
+  salted.write_bytesview(@utf8.encode(@base16.encode(inner[:]).to_lower()[:]))
+  salted.write_bytesview(salt)
   "md5" + @base16.encode(@md5.hash(salted.to_bytes()[:])[:]).to_lower()
 }

@@ -44,7 +44,7 @@ async fn read_packet_stream(r : &@io.Reader) -> (Bytes, Int32) {
     let len = hdr[0].to_int() | (hdr[1].to_int() << 8) | (hdr[2].to_int() << 16)
     seq = hdr[3].to_int()
     if len > 0 {
-      out.write_bytes(r.read_exactly(len)[:])
+      out.write_bytesview(r.read_exactly(len)[:])
     }
     if len < 0xFFFFFF {
       break
@@ -111,7 +111,7 @@ async fn write_one_packet_stream(
   buf.write_byte(((n >> 8) & 0xFF).to_byte())
   buf.write_byte(((n >> 16) & 0xFF).to_byte())
   buf.write_byte((seq & 0xFF).to_byte())
-  buf.write_bytes(payload[:])
+  buf.write_bytesview(payload[:])
   w.write(buf.to_bytes())
 }
 
@@ -357,7 +357,7 @@ async fn MysqlConn::finish_caching_sha2(
         // RSA-encrypted: the channel already protects it, and this is the path
         // MySQL documents for secure connections.
         let pwz = Buffer()
-        pwz.write_bytes(pw[:])
+        pwz.write_bytesview(pw[:])
         pwz.write_byte(b'\x00')
         self.write_packet(self.seq + 1, pwz.to_bytes())
         expect_ok_or_err(self.read_packet())
@@ -428,7 +428,7 @@ async fn MysqlConn::command_all(
   }
   let payload = Buffer()
   payload.write_byte(b'\x03') // COM_QUERY
-  payload.write_bytes(query_bytes[:])
+  payload.write_bytesview(query_bytes[:])
   // A fresh command always starts at sequence id 0.
   self.write_packet(0, payload.to_bytes())
   let outcomes : Array[Outcome] = []
@@ -755,7 +755,7 @@ pub async fn MysqlConn::query_stream(
   }
   let payload = Buffer()
   payload.write_byte(b'\x03') // COM_QUERY
-  payload.write_bytes(
+  payload.write_bytesview(
     @moonmysql.bind_params(sql, params, mode=self.quote_mode)[:],
   )
   self.write_packet(0, payload.to_bytes())

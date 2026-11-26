@@ -1199,7 +1199,7 @@ pub async fn PgConn::copy_out(
   let out = Buffer()
   for ;; {
     match stream.read_chunk() {
-      Some(chunk) => out.write_bytes(chunk[:])
+      Some(chunk) => out.write_bytesview(chunk[:])
       None => break
     }
   }
