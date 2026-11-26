@@ -1,6 +1,6 @@
 name = "moonbitstack/moonsqls"
 
-version = "0.1.1"
+version = "0.1.2"
 
 readme = "README.md"
 
@@ -24,7 +24,7 @@ description = "SQL Server for moondb — the TDS protocol, spoken directly in pu
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.3.1",
+  "moonbitstack/moondb@0.3.2",
   "moonbitstack/moontls@0.10.2",
   "moonbitstack/mooncred@0.8.1",
   "moonbitstack/moonvar@0.3.1",

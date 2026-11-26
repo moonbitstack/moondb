@@ -1,6 +1,6 @@
 name = "moonbitstack/moonduckdb"
 
-version = "0.1.1"
+version = "0.1.2"
 
 readme = "README.md"
 
@@ -31,7 +31,7 @@ description = "DuckDB for moondb: the embedded analytical engine, loaded as a sh
 preferred_target = "native"
 
 import {
-  "moonbitstack/moondb@0.3.1",
+  "moonbitstack/moondb@0.3.2",
   "moonbitlang/async@0.22.5",
 }
 

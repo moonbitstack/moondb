@@ -1,6 +1,6 @@
 name = "moonbitstack/moonmysql"
 
-version = "0.8.1"
+version = "0.8.2"
 
 readme = "README.md"
 
@@ -37,7 +37,7 @@ import {
   "moonbitstack/moonbase@0.5.1",
   "moonbitstack/mooncrypt@0.5.2",
   "moonbitstack/mooncred@0.8.1",
-  "moonbitstack/moondb@0.3.1",
+  "moonbitstack/moondb@0.3.2",
   "moonbitstack/moonvar@0.3.1",
   "moonbitstack/moonnet@0.2.2",
   "moonbitstack/moontls@0.10.2",
