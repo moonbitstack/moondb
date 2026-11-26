@@ -67,7 +67,7 @@ fn escape_into(buf : Buffer, bytes : Bytes, mode : QuoteMode) -> Unit {
   if mode is DoubleQuote {
     for i in 0..<bytes.length() {
       if bytes[i].to_int() == 0x27 {
-        buf.write_byte(b''')
+        buf.write_byte(b'\'')
       }
       buf.write_byte(bytes[i])
     }
